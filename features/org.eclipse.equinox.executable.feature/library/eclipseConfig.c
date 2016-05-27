@@ -81,14 +81,14 @@ _TCHAR* getIniFile(_TCHAR* program, int consoleLauncher){
 	}
 #elif MACOSX
 	//On MacOSX, the eclipse.ini is not a sibling of the executable.
-	//It is in ../Eclipse/<launcherName>.ini relatively to the executable.
+	//It is in ../Resources/<launcherName>.ini relatively to the executable.
 	char *dirc, *basec, *bname, *dname;
 	dirc = strdup(program);
 	basec = strdup(program);
 	dname = dirname(dirname(dirc));
 	bname = basename(basec);
 	config_file = realloc(config_file, strlen(dname) + strlen(bname) + 16 * sizeof(char));
-	sprintf(config_file, "%s/Eclipse/%s.ini", dname, bname);
+	sprintf(config_file, "%s/Resources/%s.ini", dname, bname);
 	free(dirc);
 	free(basec);
 #else

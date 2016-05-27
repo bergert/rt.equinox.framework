@@ -103,4 +103,6 @@ extern _TCHAR* checkPath( _TCHAR* path, _TCHAR* programDir, int reverseOrder );
 extern _TCHAR * lastDirSeparator(_TCHAR* str);
 
 extern _TCHAR * firstDirSeparator(_TCHAR* str);
+
+extern int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath);
 #endif

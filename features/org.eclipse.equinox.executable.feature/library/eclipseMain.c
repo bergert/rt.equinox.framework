@@ -171,6 +171,12 @@ int main( int argc, _TCHAR* argv[] )
 	/* Find the directory where the Eclipse program is installed. */
     programDir = getDirFromProgram(program);
 
+#ifdef MACOSX
+    // the config.ini is copied from MyApp.app/Contents/Eclipse folder by a project-specific post-build-script
+	if (!copyConfigFile(programDir, "../Resources/config.ini","~/fishstatj_workspace/configuration"))
+        exit( 2 );
+#endif
+
 	/* Find the eclipse library */
     eclipseLibrary = findLibrary(eclipseLibrary, program);
 
