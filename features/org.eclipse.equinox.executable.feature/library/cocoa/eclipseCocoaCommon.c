@@ -197,42 +197,54 @@ char * resolveSymlinks( char * path ) {
  * copies the config file from MyApp.app/Contents/Resources/config.ini to the specified folder inside user home directory
  * programdir: the path where the program runs ("MyApp.app/Contents/MacOS")
  * relpath: the relative path to the ini file ("../Resources/config.ini")
- * destpath: the destination path for the config ("~/fishstatj_workspace")
+ * destpath: the destination path for the config ("~/fishstatj_workspace/configuration")
  */
 int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
 	// append (programdir, relpath) and convert relpath to an absolute path (stringByStandardizingPath)
 	NSString *sourcePath        = [[[NSString stringWithUTF8String: programdir] stringByAppendingPathComponent:[NSString stringWithUTF8String: relpath]] stringByStandardizingPath];
 	// expand the tilde home directory
-	NSString *destinationFolder = [[NSString stringWithUTF8String: destpath] stringByExpandingTildeInPath];
+	NSString *configurationFolder = [[NSString stringWithUTF8String: destpath] stringByExpandingTildeInPath];
 
     NSFileManager * fileManager = [ NSFileManager defaultManager];
 	printf("programdir =  %s\n", programdir);
 	printf("sourcePath =  %s\n", [sourcePath UTF8String]);
 
+    // remove configuration folder
     NSError *error = nil;
-    BOOL isDir;
+    [fileManager removeItemAtPath:configurationFolder error:&error];
+	printf("removed %s\n", [configurationFolder UTF8String]);
+
+    // remove .metadata folder
+    error = nil;
+    NSString *metadataPath = [[configurationFolder stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".metadata"];
+	printf("removed %s\n", [metadataPath UTF8String]);
+    [fileManager removeItemAtPath:metadataPath error:&error];
+
     // if destination folder doesn't exist, create it
-    if (! [fileManager fileExistsAtPath:destinationFolder isDirectory:&isDir]) {
-        BOOL success = [fileManager createDirectoryAtPath:destinationFolder withIntermediateDirectories:YES attributes:nil error:&error];
-        if (!success || error) {
-        	printf("Error createDirectoryAtPath %s\n", [destinationFolder UTF8String]);
+    BOOL isDir = YES;
+    error = nil;
+    if (! [fileManager fileExistsAtPath:configurationFolder isDirectory:&isDir]) {
+        BOOL success = [fileManager createDirectoryAtPath:configurationFolder withIntermediateDirectories:YES attributes:nil error:&error];
+        if (!success) {
+        	printf("Error createDirectoryAtPath %s\n", [configurationFolder UTF8String]);
         	return NO;
         }
         else {
-        	printf("OK: createDirectoryAtPath %s\n", [destinationFolder UTF8String]);
+        	printf("OK: createDirectoryAtPath %s\n", [configurationFolder UTF8String]);
         }
     }
     else {
-    	printf("OK: exists %s\n", [destinationFolder UTF8String]);
+    	printf("OK: exists %s\n", [configurationFolder UTF8String]);
     }
 
     // append the file name from sourcePath to the destination folder
-    NSString *destinationPath = [destinationFolder stringByAppendingPathComponent:[sourcePath lastPathComponent]];
+    NSString *destinationPath = [configurationFolder stringByAppendingPathComponent:[sourcePath lastPathComponent]];
 
+    /*
     error = nil;
     //check if destinationPath exists
-    if ([ fileManager fileExistsAtPath:destinationPath]) {
+    if ([ fileManager fileExistsAtPath:configurationFolder isDirectory:YES]) {
     	printf("deleting old config.ini");
         //removing destination, so the file may be copied
         if (![fileManager removeItemAtPath:destinationPath error:&error])
@@ -241,7 +253,7 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
             [error release];
             return NO;
         }
-    }
+    } */
     error = nil;
     //finally, copy the config.ini file
     if ( !( [ fileManager copyItemAtPath:sourcePath toPath:destinationPath error:&error ]) )  {
