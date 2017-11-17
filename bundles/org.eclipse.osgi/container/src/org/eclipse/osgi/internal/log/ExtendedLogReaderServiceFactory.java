@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2014 Cognos Incorporated, IBM Corporation and others
+ * Copyright (c) 2006, 2017 Cognos Incorporated, IBM Corporation and others
  * All rights reserved. This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License v1.0 which
  * accompanies this distribution, and is available at
@@ -15,8 +15,7 @@ import org.eclipse.equinox.log.LogFilter;
 import org.eclipse.equinox.log.SynchronousLogListener;
 import org.eclipse.osgi.framework.util.ArrayMap;
 import org.osgi.framework.*;
-import org.osgi.service.log.LogEntry;
-import org.osgi.service.log.LogListener;
+import org.osgi.service.log.*;
 
 public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedLogReaderServiceImpl> {
 
@@ -37,7 +36,7 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 	}
 
 	@SuppressWarnings("unchecked")
-	private static final Enumeration<?> EMPTY_ENUMERATION = Collections.enumeration(Collections.EMPTY_LIST);
+	private static final Enumeration<LogEntry> EMPTY_ENUMERATION = Collections.enumeration(Collections.EMPTY_LIST);
 
 	static final LogFilter NULL_LOGGER_FILTER = new LogFilter() {
 		public boolean isLoggable(Bundle b, String loggerName, int logLevel) {
@@ -50,11 +49,12 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 	private static PrintStream errorStream;
 
 	private final BasicReadWriteLock listenersLock = new BasicReadWriteLock();
-	private ArrayMap<LogListener, Object[]> listeners = new ArrayMap<LogListener, Object[]>(5);
+	private ArrayMap<LogListener, Object[]> listeners = new ArrayMap<>(5);
 	private LogFilter[] filters = null;
-	private final ThreadLocal<int[]> nestedCallCount = new ThreadLocal<int[]>();
+	private final ThreadLocal<int[]> nestedCallCount = new ThreadLocal<>();
 	private final LinkedList<LogEntry> history;
 	private final int maxHistory;
+	private final LogLevel defaultLevel;
 
 	static boolean safeIsLoggable(LogFilter filter, Bundle bundle, String name, int level) {
 		try {
@@ -98,13 +98,18 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 		}
 	}
 
-	public ExtendedLogReaderServiceFactory(int maxHistory) {
+	public ExtendedLogReaderServiceFactory(int maxHistory, LogLevel defaultLevel) {
+		this.defaultLevel = defaultLevel;
 		this.maxHistory = maxHistory;
 		if (maxHistory > 0) {
-			history = new LinkedList<LogEntry>();
+			history = new LinkedList<>();
 		} else {
 			history = null;
 		}
+	}
+
+	public LogLevel getDefaultLogLevel() {
+		return defaultLevel;
 	}
 
 	public ExtendedLogReaderServiceImpl getService(Bundle bundle, ServiceRegistration<ExtendedLogReaderServiceImpl> registration) {
@@ -177,21 +182,21 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 		return count;
 	}
 
-	void log(final Bundle bundle, final String name, final Object context, final int level, final String message, final Throwable exception) {
+	void log(final Bundle bundle, final String name, final StackTraceElement stackTraceElement, final Object context, final LogLevel logLevelEnum, final int level, final String message, final Throwable exception) {
 		if (System.getSecurityManager() != null) {
 			AccessController.doPrivileged(new PrivilegedAction<Void>() {
 				public Void run() {
-					logPrivileged(bundle, name, context, level, message, exception);
+					logPrivileged(bundle, name, stackTraceElement, context, logLevelEnum, level, message, exception);
 					return null;
 				}
 			});
 		} else {
-			logPrivileged(bundle, name, context, level, message, exception);
+			logPrivileged(bundle, name, stackTraceElement, context, logLevelEnum, level, message, exception);
 		}
 	}
 
-	void logPrivileged(Bundle bundle, String name, Object context, int level, String message, Throwable exception) {
-		LogEntry logEntry = new ExtendedLogEntryImpl(bundle, name, context, level, message, exception);
+	void logPrivileged(Bundle bundle, String name, StackTraceElement stackTraceElement, Object context, LogLevel logLevelEnum, int level, String message, Throwable exception) {
+		LogEntry logEntry = new ExtendedLogEntryImpl(bundle, name, stackTraceElement, context, logLevelEnum, level, message, exception);
 		storeEntry(logEntry);
 		ArrayMap<LogListener, Object[]> listenersCopy;
 		listenersLock.readLock();
@@ -227,9 +232,9 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 		if (history != null) {
 			synchronized (history) {
 				if (history.size() == maxHistory) {
-					history.removeFirst();
+					history.removeLast();
 				}
-				history.addLast(logEntry);
+				history.addFirst(logEntry);
 			}
 		}
 	}
@@ -237,7 +242,7 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 	void addLogListener(LogListener listener, LogFilter filter) {
 		listenersLock.writeLock();
 		try {
-			ArrayMap<LogListener, Object[]> listenersCopy = new ArrayMap<LogListener, Object[]>(listeners.getKeys(), listeners.getValues());
+			ArrayMap<LogListener, Object[]> listenersCopy = new ArrayMap<>(listeners.getKeys(), listeners.getValues());
 			Object[] listenerObjects = listenersCopy.get(listener);
 			if (listenerObjects == null) {
 				// Only create a task queue for non-SynchronousLogListeners
@@ -256,7 +261,7 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 	}
 
 	private void recalculateFilters(ArrayMap<LogListener, Object[]> listenersCopy) {
-		List<LogFilter> filtersList = new ArrayList<LogFilter>();
+		List<LogFilter> filtersList = new ArrayList<>();
 		int size = listenersCopy.size();
 		for (int i = 0; i < size; i++) {
 			Object[] listenerObjects = listenersCopy.getValue(i);
@@ -277,7 +282,7 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 	void removeLogListener(LogListener listener) {
 		listenersLock.writeLock();
 		try {
-			ArrayMap<LogListener, Object[]> listenersCopy = new ArrayMap<LogListener, Object[]>(listeners.getKeys(), listeners.getValues());
+			ArrayMap<LogListener, Object[]> listenersCopy = new ArrayMap<>(listeners.getKeys(), listeners.getValues());
 			listenersCopy.remove(listener);
 			recalculateFilters(listenersCopy);
 			listeners = listenersCopy;
@@ -286,12 +291,13 @@ public class ExtendedLogReaderServiceFactory implements ServiceFactory<ExtendedL
 		}
 	}
 
-	Enumeration<?> getLog() {
+	Enumeration<LogEntry> getLog() {
 		if (history == null) {
 			return EMPTY_ENUMERATION;
 		}
 		synchronized (history) {
-			return Collections.enumeration(new ArrayList<LogEntry>(history));
+			return Collections.enumeration(new ArrayList<>(history));
 		}
 	}
+
 }

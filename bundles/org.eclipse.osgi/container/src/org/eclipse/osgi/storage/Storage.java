@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2016 IBM Corporation and others.
+ * Copyright (c) 2012, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -10,21 +10,61 @@
  *******************************************************************************/
 package org.eclipse.osgi.storage;
 
-import java.io.*;
-import java.net.*;
-import java.security.*;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLConnection;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Properties;
+import java.util.StringTokenizer;
 import org.eclipse.core.runtime.adaptor.EclipseStarter;
-import org.eclipse.osgi.container.*;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleCapability;
+import org.eclipse.osgi.container.ModuleContainer;
+import org.eclipse.osgi.container.ModuleContainerAdaptor;
+import org.eclipse.osgi.container.ModuleDatabase;
+import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleRevisionBuilder;
 import org.eclipse.osgi.container.ModuleRevisionBuilder.GenericInfo;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
 import org.eclipse.osgi.container.builders.OSGiManifestBuilderFactory;
 import org.eclipse.osgi.container.namespaces.EclipsePlatformNamespace;
 import org.eclipse.osgi.framework.log.FrameworkLogEntry;
-import org.eclipse.osgi.framework.util.*;
-import org.eclipse.osgi.internal.container.LockSet;
+import org.eclipse.osgi.framework.util.FilePath;
+import org.eclipse.osgi.framework.util.ObjectPool;
+import org.eclipse.osgi.framework.util.SecureAction;
 import org.eclipse.osgi.internal.debug.Debug;
-import org.eclipse.osgi.internal.framework.*;
+import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
+import org.eclipse.osgi.internal.framework.EquinoxContainer;
+import org.eclipse.osgi.internal.framework.EquinoxContainerAdaptor;
+import org.eclipse.osgi.internal.framework.FilterImpl;
 import org.eclipse.osgi.internal.hookregistry.BundleFileWrapperFactoryHook;
 import org.eclipse.osgi.internal.hookregistry.StorageHookFactory;
 import org.eclipse.osgi.internal.hookregistry.StorageHookFactory.StorageHook;
@@ -36,16 +76,33 @@ import org.eclipse.osgi.internal.permadmin.SecurityAdmin;
 import org.eclipse.osgi.internal.url.URLStreamHandlerFactoryImpl;
 import org.eclipse.osgi.service.datalocation.Location;
 import org.eclipse.osgi.storage.BundleInfo.Generation;
-import org.eclipse.osgi.storage.bundlefile.*;
+import org.eclipse.osgi.storage.bundlefile.BundleEntry;
+import org.eclipse.osgi.storage.bundlefile.BundleFile;
+import org.eclipse.osgi.storage.bundlefile.BundleFileWrapper;
+import org.eclipse.osgi.storage.bundlefile.BundleFileWrapperChain;
+import org.eclipse.osgi.storage.bundlefile.DirBundleFile;
+import org.eclipse.osgi.storage.bundlefile.MRUBundleFileList;
+import org.eclipse.osgi.storage.bundlefile.NestedDirBundleFile;
+import org.eclipse.osgi.storage.bundlefile.ZipBundleFile;
 import org.eclipse.osgi.storage.url.reference.Handler;
 import org.eclipse.osgi.storage.url.reference.ReferenceInputStream;
 import org.eclipse.osgi.storagemanager.ManagedOutputStream;
 import org.eclipse.osgi.storagemanager.StorageManager;
 import org.eclipse.osgi.util.ManifestElement;
 import org.eclipse.osgi.util.NLS;
-import org.osgi.framework.*;
-import org.osgi.framework.namespace.*;
-import org.osgi.framework.wiring.*;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.Constants;
+import org.osgi.framework.Filter;
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.framework.Version;
+import org.osgi.framework.namespace.HostNamespace;
+import org.osgi.framework.namespace.NativeNamespace;
+import org.osgi.framework.namespace.PackageNamespace;
+import org.osgi.framework.wiring.BundleCapability;
+import org.osgi.framework.wiring.BundleRevision;
+import org.osgi.framework.wiring.BundleWiring;
 import org.osgi.resource.Namespace;
 import org.osgi.resource.Requirement;
 
@@ -62,6 +119,7 @@ public class Storage {
 	private static final String JAVASE = "JavaSE"; //$NON-NLS-1$
 	private static final String PROFILE_EXT = ".profile"; //$NON-NLS-1$
 	private static final String NUL = new String(new byte[] {0});
+	private static final String INITIAL_LOCATION = "initial@"; //$NON-NLS-1$
 
 	static final SecureAction secureAction = AccessController.doPrivileged(SecureAction.createSecureAction());
 
@@ -77,7 +135,6 @@ public class Storage {
 	private final ModuleContainer moduleContainer;
 	private final Object saveMonitor = new Object();
 	private long lastSavedTimestamp = -1;
-	private final LockSet<Long> idLocks = new LockSet<Long>();
 	private final MRUBundleFileList mruList;
 	private final FrameworkExtensionInstaller extensionInstaller;
 	private final List<String> cachedHeaderKeys = Arrays.asList(Constants.BUNDLE_SYMBOLICNAME, Constants.BUNDLE_ACTIVATIONPOLICY, "Service-Component"); //$NON-NLS-1$
@@ -114,7 +171,7 @@ public class Storage {
 			osgiParentLocation = parentConfigLocation.createLocation(null, parentConfigLocation.getDataArea(EquinoxContainer.NAME), true);
 		}
 		this.osgiLocation = configLocation.createLocation(osgiParentLocation, configLocation.getDataArea(EquinoxContainer.NAME), configLocation.isReadOnly());
-		this.childRoot = new File(osgiLocation.getURL().getFile());
+		this.childRoot = new File(osgiLocation.getURL().getPath());
 
 		if (Boolean.valueOf(container.getConfiguration().getConfiguration(EquinoxConfiguration.PROP_CLEAN)).booleanValue()) {
 			cleanOSGiStorage(osgiLocation, childRoot);
@@ -123,7 +180,13 @@ public class Storage {
 			this.childRoot.mkdirs();
 		}
 		Location parent = this.osgiLocation.getParentLocation();
-		parentRoot = parent == null ? null : new File(parent.getURL().getFile());
+		parentRoot = parent == null ? null : new File(parent.getURL().getPath());
+
+		if (container.getConfiguration().getConfiguration(Constants.FRAMEWORK_STORAGE) == null) {
+			// Set the derived value if not already set as part of configuration.
+			// Note this is the parent directory of where the framework stores data (org.eclipse.osgi/)
+			container.getConfiguration().setConfiguration(Constants.FRAMEWORK_STORAGE, childRoot.getParentFile().getAbsolutePath());
+		}
 
 		InputStream info = getInfoInputStream();
 		DataInputStream data = info == null ? null : new DataInputStream(new BufferedInputStream(info));
@@ -133,7 +196,7 @@ public class Storage {
 				generations = loadGenerations(data);
 			} catch (IllegalArgumentException e) {
 				equinoxContainer.getLogServices().log(EquinoxContainer.NAME, FrameworkLogEntry.WARNING, "The persistent format for the framework data has changed.  The framework will be reinitialized: " + e.getMessage(), null); //$NON-NLS-1$
-				generations = new HashMap<Long, Generation>(0);
+				generations = new HashMap<>(0);
 				data = null;
 				cleanOSGiStorage(osgiLocation, childRoot);
 			}
@@ -185,7 +248,7 @@ public class Storage {
 		if (systemWiring == null) {
 			return;
 		}
-		Collection<ModuleRevision> fragments = new ArrayList<ModuleRevision>();
+		Collection<ModuleRevision> fragments = new ArrayList<>();
 		for (ModuleWire hostWire : systemWiring.getProvidedModuleWires(HostNamespace.HOST_NAMESPACE)) {
 			fragments.add(hostWire.getRequirer());
 		}
@@ -205,7 +268,7 @@ public class Storage {
 	}
 
 	private void discardBundlesOnLoad() throws BundleException {
-		Collection<Module> discarded = new ArrayList<Module>(0);
+		Collection<Module> discarded = new ArrayList<>(0);
 		for (Module module : moduleContainer.getModules()) {
 			if (module.getId() == Constants.SYSTEM_BUNDLE_ID)
 				continue;
@@ -377,6 +440,10 @@ public class Storage {
 		if (location.isReadOnly() || !StorageUtil.rm(root, getConfiguration().getDebug().DEBUG_STORAGE)) {
 			equinoxContainer.getLogServices().log(EquinoxContainer.NAME, FrameworkLogEntry.ERROR, "The -clean (osgi.clean) option was not successful. Unable to clean the storage area: " + root.getAbsolutePath(), null); //$NON-NLS-1$
 		}
+		if (!location.isReadOnly()) {
+			// make sure to recreate to root folder
+			root.mkdirs();
+		}
 	}
 
 	public ModuleDatabase getModuleDatabase() {
@@ -448,18 +515,24 @@ public class Storage {
 		ModuleRevision current = module.getCurrentRevision();
 		Generation generation = (Generation) current.getRevisionInfo();
 		String updateLocation = generation.getHeaders().get(Constants.BUNDLE_UPDATELOCATION);
-		return updateLocation == null ? module.getLocation() : updateLocation;
+		if (updateLocation == null) {
+			updateLocation = module.getLocation();
+		}
+		if (updateLocation.startsWith(INITIAL_LOCATION)) {
+			updateLocation = updateLocation.substring(INITIAL_LOCATION.length());
+		}
+		return updateLocation;
 	}
 
 	private URLConnection getContentConnection(final String spec) throws IOException {
 		if (System.getSecurityManager() == null) {
-			return createURL(spec).openConnection();
+			return LocationHelper.getConnection(createURL(spec));
 		}
 		try {
 			return AccessController.doPrivileged(new PrivilegedExceptionAction<URLConnection>() {
 				@Override
 				public URLConnection run() throws IOException {
-					return createURL(spec).openConnection();
+					return LocationHelper.getConnection(createURL(spec));
 				}
 			});
 		} catch (PrivilegedActionException e) {
@@ -517,20 +590,22 @@ public class Storage {
 		boolean isReference = in instanceof ReferenceInputStream;
 		File staged = stageContent(in, sourceURL);
 		Generation generation = null;
-		Long lockedID = getNextRootID();
 		try {
-			BundleInfo info = new BundleInfo(this, lockedID, bundleLocation, 0);
+			Long nextID = moduleDatabase.getAndIncrementNextId();
+			BundleInfo info = new BundleInfo(this, nextID, bundleLocation, 0);
 			generation = info.createGeneration();
 
-			File contentFile = getContentFile(staged, isReference, lockedID, generation.getGenerationId());
+			File contentFile = getContentFile(staged, isReference, nextID, generation.getGenerationId());
 			generation.setContent(contentFile, isReference);
 			// Check that we can open the bundle file
 			generation.getBundleFile().open();
 			setStorageHooks(generation);
 
 			ModuleRevisionBuilder builder = getBuilder(generation);
+			builder.setId(nextID);
+
 			Module m = moduleContainer.install(origin, bundleLocation, builder, generation);
-			if (!lockedID.equals(m.getId())) {
+			if (!nextID.equals(m.getId())) {
 				// this revision is already installed. delete the generation
 				generation.delete();
 				return (Generation) m.getCurrentRevision().getRevisionInfo();
@@ -564,7 +639,6 @@ public class Storage {
 			if (generation != null) {
 				generation.getBundleInfo().unlockGeneration(generation);
 			}
-			idLocks.unlock(lockedID);
 		}
 	}
 
@@ -572,8 +646,8 @@ public class Storage {
 		if (generation.getBundleInfo().getBundleId() == 0) {
 			return; // ignore system bundle
 		}
-		List<StorageHookFactory<?, ?, ?>> factories = new ArrayList<StorageHookFactory<?, ?, ?>>(getConfiguration().getHookRegistry().getStorageHookFactories());
-		List<StorageHook<?, ?>> hooks = new ArrayList<StorageHook<?, ?>>(factories.size());
+		List<StorageHookFactory<?, ?, ?>> factories = new ArrayList<>(getConfiguration().getHookRegistry().getStorageHookFactories());
+		List<StorageHook<?, ?>> hooks = new ArrayList<>(factories.size());
 		for (Iterator<StorageHookFactory<?, ?, ?>> iFactories = factories.iterator(); iFactories.hasNext();) {
 			@SuppressWarnings("unchecked")
 			StorageHookFactory<Object, Object, StorageHook<Object, Object>> next = (StorageHookFactory<Object, Object, StorageHook<Object, Object>>) iFactories.next();
@@ -594,7 +668,7 @@ public class Storage {
 			Map<String, String> unchecked = (Map<String, String>) headers;
 			mapHeaders = unchecked;
 		} else {
-			mapHeaders = new HashMap<String, String>();
+			mapHeaders = new HashMap<>();
 			for (Enumeration<String> eKeys = headers.keys(); eKeys.hasMoreElements();) {
 				String key = eKeys.nextElement();
 				mapHeaders.put(key, headers.get(key));
@@ -842,6 +916,7 @@ public class Storage {
 
 			if ("file".equals(protocol)) { //$NON-NLS-1$
 				File inFile = new File(sourceURL.getPath());
+				inFile = LocationHelper.decodePath(inFile);
 				if (inFile.isDirectory()) {
 					// need to delete the outFile because it is not a directory
 					outFile.delete();
@@ -861,33 +936,6 @@ public class Storage {
 		}
 	}
 
-	private Long getNextRootID() throws BundleException {
-		// Try up to 500 times
-		for (int i = 0; i < 500; i++) {
-			moduleDatabase.readLock();
-			try {
-				Long nextID = moduleDatabase.getNextId();
-				try {
-					if (idLocks.tryLock(nextID, 0, TimeUnit.SECONDS)) {
-						return nextID;
-					}
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-					throw new BundleException("Failed to obtain id locks for installation.", BundleException.STATECHANGE_ERROR, e); //$NON-NLS-1$
-				}
-			} finally {
-				moduleDatabase.readUnlock();
-			}
-			// sleep to allow another thread to get the database lock
-			try {
-				Thread.sleep(50);
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-			}
-		}
-		throw new BundleException("Failed to obtain id locks for installation.", BundleException.STATECHANGE_ERROR); //$NON-NLS-1$
-	}
-
 	/**
 	 * Attempts to set the permissions of the file in a system dependent way.
 	 * @param file the file to set the permissions on
@@ -899,7 +947,7 @@ public class Storage {
 		if (commandProp == null)
 			return;
 		String[] temp = ManifestElement.getArrayFromList(commandProp, " "); //$NON-NLS-1$
-		List<String> command = new ArrayList<String>(temp.length + 1);
+		List<String> command = new ArrayList<>(temp.length + 1);
 		boolean foundFullPath = false;
 		for (int i = 0; i < temp.length; i++) {
 			if ("[fullpath]".equals(temp[i]) || "${abspath}".equals(temp[i])) { //$NON-NLS-1$ //$NON-NLS-2$
@@ -1085,7 +1133,7 @@ public class Storage {
 
 	private void saveGenerations(DataOutputStream out) throws IOException {
 		List<Module> modules = moduleContainer.getModules();
-		List<Generation> generations = new ArrayList<Generation>();
+		List<Generation> generations = new ArrayList<>();
 		for (Module module : modules) {
 			ModuleRevision revision = module.getCurrentRevision();
 			if (revision != null) {
@@ -1170,21 +1218,21 @@ public class Storage {
 
 	private Map<Long, Generation> loadGenerations(DataInputStream in) throws IOException {
 		if (in == null) {
-			return new HashMap<Long, Generation>(0);
+			return new HashMap<>(0);
 		}
 		int version = in.readInt();
 		if (version != VERSION) {
 			throw new IllegalArgumentException("Found persistent version \"" + version + "\" expecting \"" + VERSION + "\""); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 		}
 		int numCachedHeaders = in.readInt();
-		List<String> storedCachedHeaderKeys = new ArrayList<String>(numCachedHeaders);
+		List<String> storedCachedHeaderKeys = new ArrayList<>(numCachedHeaders);
 		for (int i = 0; i < numCachedHeaders; i++) {
 			storedCachedHeaderKeys.add(ObjectPool.intern(in.readUTF()));
 		}
 
 		int numInfos = in.readInt();
-		Map<Long, Generation> result = new HashMap<Long, Generation>(numInfos);
-		List<Generation> generations = new ArrayList<BundleInfo.Generation>(numInfos);
+		Map<Long, Generation> result = new HashMap<>(numInfos);
+		List<Generation> generations = new ArrayList<>(numInfos);
 		for (int i = 0; i < numInfos; i++) {
 			long infoId = in.readLong();
 			String infoLocation = ObjectPool.intern(in.readUTF());
@@ -1196,7 +1244,7 @@ public class Storage {
 			String contentPath = in.readUTF();
 			long lastModified = in.readLong();
 
-			Map<String, String> cachedHeaders = new HashMap<String, String>(storedCachedHeaderKeys.size());
+			Map<String, String> cachedHeaders = new HashMap<>(storedCachedHeaderKeys.size());
 			for (String headerKey : storedCachedHeaderKeys) {
 				String value = in.readUTF();
 				if (NUL.equals(value)) {
@@ -1211,18 +1259,20 @@ public class Storage {
 			if (infoId == 0) {
 				content = getSystemContent();
 				isDirectory = content != null ? content.isDirectory() : false;
+				// Note that we do not do any checking for absolute paths with
+				// the system bundle.  We always take the content as discovered
+				// by getSystemContent()
 			} else {
 				content = new File(contentPath);
-			}
-
-			if (content != null && !content.isAbsolute()) {
-				// make sure it has the absolute location instead
-				if (isReference) {
-					// reference installs are relative to the installPath
-					content = new File(installPath, contentPath);
-				} else {
-					// normal installs are relative to the storage area
-					content = getFile(contentPath, true);
+				if (!content.isAbsolute()) {
+					// make sure it has the absolute location instead
+					if (isReference) {
+						// reference installs are relative to the installPath
+						content = new File(installPath, contentPath);
+					} else {
+						// normal installs are relative to the storage area
+						content = getFile(contentPath, true);
+					}
 				}
 			}
 
@@ -1237,8 +1287,8 @@ public class Storage {
 	}
 
 	private void loadStorageHookData(List<Generation> generations, DataInputStream in) throws IOException {
-		List<StorageHookFactory<?, ?, ?>> factories = new ArrayList<StorageHookFactory<?, ?, ?>>(getConfiguration().getHookRegistry().getStorageHookFactories());
-		Map<Generation, List<StorageHook<?, ?>>> hookMap = new HashMap<Generation, List<StorageHook<?, ?>>>();
+		List<StorageHookFactory<?, ?, ?>> factories = new ArrayList<>(getConfiguration().getHookRegistry().getStorageHookFactories());
+		Map<Generation, List<StorageHook<?, ?>>> hookMap = new HashMap<>();
 		int numFactories = in.readInt();
 		for (int i = 0; i < numFactories; i++) {
 			String factoryName = in.readUTF();
@@ -1314,7 +1364,7 @@ public class Storage {
 	private static List<StorageHook<?, ?>> getHooks(Map<Generation, List<StorageHook<?, ?>>> hookMap, Generation generation) {
 		List<StorageHook<?, ?>> result = hookMap.get(generation);
 		if (result == null) {
-			result = new ArrayList<StorageHook<?, ?>>();
+			result = new ArrayList<>();
 			hookMap.put(generation, result);
 		}
 		return result;
@@ -1418,10 +1468,13 @@ public class Storage {
 							File release = new File(javaHome, "release"); //$NON-NLS-1$
 							if (release.exists()) {
 								Properties releaseProps = new Properties();
-								try {
-									releaseProps.load(new FileInputStream(release));
-									if (releaseProps.containsKey("JAVA_PROFILE")) { //$NON-NLS-1$
-										embeddedProfileName = "_" + releaseProps.getProperty("JAVA_PROFILE") + "-"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+								try (InputStream releaseStream = new FileInputStream(release)) {
+									releaseProps.load(releaseStream);
+									String releaseName = releaseProps.getProperty("JAVA_PROFILE"); //$NON-NLS-1$
+									if (releaseName != null) {
+										// make sure to remove extra quotes
+										releaseName = releaseName.replaceAll("^\\s*\"?|\"?\\s*$", ""); //$NON-NLS-1$ //$NON-NLS-2$
+										embeddedProfileName = "_" + releaseName + "-"; //$NON-NLS-1$ //$NON-NLS-2$
 									}
 								} catch (IOException e) {
 									// ignore
@@ -1452,8 +1505,8 @@ public class Storage {
 				profileIn = getNextBestProfile(systemGeneration, javaEdition, javaVersion, embeddedProfileName);
 		}
 		if (profileIn == null)
-			// the profile url is still null then use the osgi min profile in OSGi by default
-			profileIn = findInSystemBundle(systemGeneration, "JavaSE-1.6.profile"); //$NON-NLS-1$
+			// the profile url is still null then use the min profile the framework can use
+			profileIn = findInSystemBundle(systemGeneration, "JavaSE-1.7.profile"); //$NON-NLS-1$
 		if (profileIn != null) {
 			try {
 				result.load(new BufferedInputStream(profileIn));
@@ -1473,7 +1526,7 @@ public class Storage {
 				result.put(EquinoxConfiguration.PROP_OSGI_JAVA_PROFILE_NAME, vmProfile.replace('_', '/'));
 			else
 				// last resort; default to the absolute minimum profile name for the framework
-				result.put(EquinoxConfiguration.PROP_OSGI_JAVA_PROFILE_NAME, "JavaSE-1.6"); //$NON-NLS-1$
+				result.put(EquinoxConfiguration.PROP_OSGI_JAVA_PROFILE_NAME, "JavaSE-1.7"); //$NON-NLS-1$
 		return result;
 	}
 
@@ -1506,6 +1559,9 @@ public class Storage {
 			} else if (major <= 9 && major > 1) {
 				minor = 8;
 				major = 1;
+			} else {
+				// we have reached the end of our search; return the existing result;
+				return result;
 			}
 		} while (result == null && minor >= 0);
 		return result;
@@ -1531,7 +1587,7 @@ public class Storage {
 	}
 
 	public static Enumeration<URL> findEntries(List<Generation> generations, String path, String filePattern, int options) {
-		List<BundleFile> bundleFiles = new ArrayList<BundleFile>(generations.size());
+		List<BundleFile> bundleFiles = new ArrayList<>(generations.size());
 		for (Generation generation : generations)
 			bundleFiles.add(generation.getBundleFile());
 		// search all the bundle files
@@ -1598,7 +1654,7 @@ public class Storage {
 	public static List<String> listEntryPaths(List<BundleFile> bundleFiles, String path, String filePattern, int options) {
 		// Use LinkedHashSet for optimized performance of contains() plus
 		// ordering guarantees.
-		LinkedHashSet<String> pathList = new LinkedHashSet<String>();
+		LinkedHashSet<String> pathList = new LinkedHashSet<>();
 		Filter patternFilter = null;
 		Hashtable<String, String> patternProps = null;
 		if (filePattern != null) {
@@ -1613,26 +1669,26 @@ public class Storage {
 					if (bundleFile.getEntry(path) != null && !pathList.contains(path))
 						pathList.add(path);
 				}
-				return new ArrayList<String>(pathList);
+				return new ArrayList<>(pathList);
 			}
 			// For when the file pattern includes a wildcard.
 			try {
 				// create a file pattern filter with 'filename' as the key
 				patternFilter = FilterImpl.newInstance("(filename=" + sanitizeFilterInput(filePattern) + ")"); //$NON-NLS-1$ //$NON-NLS-2$
 				// create a single hashtable to be shared during the recursive search
-				patternProps = new Hashtable<String, String>(2);
+				patternProps = new Hashtable<>(2);
 			} catch (InvalidSyntaxException e) {
 				// TODO something unexpected happened; log error and return nothing
 				//				Bundle b = context == null ? null : context.getBundle();
 				//				eventPublisher.publishFrameworkEvent(FrameworkEvent.ERROR, b, e);
-				return new ArrayList<String>(pathList);
+				return new ArrayList<>(pathList);
 			}
 		}
 		// find the entry paths for the datas
 		for (BundleFile bundleFile : bundleFiles) {
 			listEntryPaths(bundleFile, path, patternFilter, patternProps, options, pathList);
 		}
-		return new ArrayList<String>(pathList);
+		return new ArrayList<>(pathList);
 	}
 
 	public static String sanitizeFilterInput(String filePattern) throws InvalidSyntaxException {
@@ -1679,7 +1735,7 @@ public class Storage {
 	// guarantees.
 	private static LinkedHashSet<String> listEntryPaths(BundleFile bundleFile, String path, Filter patternFilter, Hashtable<String, String> patternProps, int options, LinkedHashSet<String> pathList) {
 		if (pathList == null)
-			pathList = new LinkedHashSet<String>();
+			pathList = new LinkedHashSet<>();
 		Enumeration<String> entryPaths;
 		if ((options & BundleWiring.FINDENTRIES_RECURSE) != 0)
 			entryPaths = bundleFile.getEntryPaths(path, true);

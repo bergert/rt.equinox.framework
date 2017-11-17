@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OSGi Alliance (2000, 2013). All Rights Reserved.
+ * Copyright (c) OSGi Alliance (2000, 2017). All Rights Reserved.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -320,9 +320,7 @@ public final class CapabilityPermission extends BasicPermission {
 		try {
 			return FrameworkUtil.createFilter(filterString);
 		} catch (InvalidSyntaxException e) {
-			IllegalArgumentException iae = new IllegalArgumentException("invalid filter");
-			iae.initCause(e);
-			throw iae;
+			throw new IllegalArgumentException("invalid filter", e);
 		}
 	}
 
@@ -387,7 +385,7 @@ public final class CapabilityPermission extends BasicPermission {
 	public String getActions() {
 		String result = actions;
 		if (result == null) {
-			StringBuffer sb = new StringBuffer();
+			StringBuilder sb = new StringBuilder();
 			boolean comma = false;
 
 			int mask = action_mask;
@@ -507,8 +505,9 @@ public final class CapabilityPermission extends BasicPermission {
 			return properties = props;
 		}
 		AccessController.doPrivileged(new PrivilegedAction<Void>() {
+			@Override
 			public Void run() {
-				props.put("id", new Long(bundle.getBundleId()));
+				props.put("id", Long.valueOf(bundle.getBundleId()));
 				props.put("location", bundle.getLocation());
 				String name = bundle.getSymbolicName();
 				if (name != null) {
@@ -551,6 +550,7 @@ public final class CapabilityPermission extends BasicPermission {
 			return attributes.get(key);
 		}
 
+		@Override
 		public Set<Map.Entry<String, Object>> entrySet() {
 			if (entries != null) {
 				return entries;

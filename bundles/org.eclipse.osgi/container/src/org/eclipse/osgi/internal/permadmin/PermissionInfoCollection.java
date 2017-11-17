@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2008, 2012 IBM Corporation and others.
+ * Copyright (c) 2008, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -12,7 +12,6 @@ package org.eclipse.osgi.internal.permadmin;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.security.*;
 import java.util.*;
 import org.osgi.service.permissionadmin.PermissionInfo;
@@ -26,7 +25,7 @@ public final class PermissionInfoCollection extends PermissionCollection {
 	static private final Class<?>[][] permClassArrayArgs = new Class[][] {noArgClassArray, oneStringClassArray, twoStringClassArray};
 
 	/* @GuardedBy(cachedPermisssionCollections) */
-	private final Map<Class<? extends Permission>, PermissionCollection> cachedPermissionCollections = new HashMap<Class<? extends Permission>, PermissionCollection>();
+	private final Map<Class<? extends Permission>, PermissionCollection> cachedPermissionCollections = new HashMap<>();
 	private final boolean hasAllPermission;
 	private final PermissionInfo[] permInfos;
 
@@ -52,7 +51,7 @@ public final class PermissionInfoCollection extends PermissionCollection {
 	public boolean implies(Permission perm) {
 		if (hasAllPermission)
 			return true;
-		Class<? extends Permission> permClass = perm.getClass();
+		final Class<? extends Permission> permClass = perm.getClass();
 		PermissionCollection collection;
 		synchronized (cachedPermissionCollections) {
 			collection = cachedPermissionCollections.get(permClass);
@@ -60,12 +59,25 @@ public final class PermissionInfoCollection extends PermissionCollection {
 		// must populate the collection outside of the lock to prevent class loader deadlock
 		if (collection == null) {
 			collection = perm.newPermissionCollection();
-			if (collection == null)
+			if (collection == null) {
 				collection = new PermissionsHash();
+			}
 			try {
-				addPermissions(collection, permClass);
+				final PermissionCollection targetCollection = collection;
+				AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {
+					@Override
+					public Object run() throws Exception {
+						addPermissions(targetCollection, permClass);
+						return null;
+					}
+
+				});
+
 			} catch (Exception e) {
-				throw (SecurityException) new SecurityException("Exception creating permissions: " + permClass + ": " + e.getMessage()).initCause(e); //$NON-NLS-1$ //$NON-NLS-2$
+				if (e instanceof PrivilegedActionException) {
+					e = ((PrivilegedActionException) e).getException();
+				}
+				throw new SecurityException("Exception creating permissions: " + permClass + ": " + e.getMessage(), e); //$NON-NLS-1$ //$NON-NLS-2$
 			}
 			synchronized (cachedPermissionCollections) {
 				// check to see if another thread beat this thread at adding the collection
@@ -83,7 +95,7 @@ public final class PermissionInfoCollection extends PermissionCollection {
 		return permInfos;
 	}
 
-	private void addPermissions(PermissionCollection collection, Class<? extends Permission> permClass) throws NoSuchMethodException, IllegalAccessException, InstantiationException, InvocationTargetException {
+	void addPermissions(PermissionCollection collection, Class<? extends Permission> permClass) throws Exception {
 		String permClassName = permClass.getName();
 		Constructor<? extends Permission> constructor = null;
 		int numArgs = -1;

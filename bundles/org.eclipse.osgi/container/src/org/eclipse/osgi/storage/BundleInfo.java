@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2013 IBM Corporation and others.
+ * Copyright (c) 2012, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -10,15 +10,30 @@
  *******************************************************************************/
 package org.eclipse.osgi.storage;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.ProtectionDomain;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleContainerAdaptor.ModuleEvent;
 import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleRevisionBuilder;
 import org.eclipse.osgi.framework.log.FrameworkLogEntry;
-import org.eclipse.osgi.framework.util.Headers;
+import org.eclipse.osgi.framework.util.CaseInsensitiveDictionaryMap;
 import org.eclipse.osgi.internal.container.LockSet;
 import org.eclipse.osgi.internal.debug.Debug;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
@@ -30,6 +45,7 @@ import org.eclipse.osgi.storage.bundlefile.BundleEntry;
 import org.eclipse.osgi.storage.bundlefile.BundleFile;
 import org.eclipse.osgi.storage.url.BundleResourceHandler;
 import org.eclipse.osgi.storage.url.bundleentry.Handler;
+import org.eclipse.osgi.util.ManifestElement;
 import org.eclipse.osgi.util.NLS;
 import org.osgi.framework.BundleException;
 
@@ -45,7 +61,7 @@ public final class BundleInfo {
 		private boolean isReference;
 		private boolean hasPackageInfo;
 		private BundleFile bundleFile;
-		private Headers<String, String> rawHeaders;
+		private Map<String, String> rawHeaders;
 		private ModuleRevision revision;
 		private ManifestLocalization headerLocalization;
 		private ProtectionDomain domain;
@@ -97,16 +113,15 @@ public final class BundleInfo {
 			return cachedHeaders;
 		}
 
-		Headers<String, String> getRawHeaders() {
+		Map<String, String> getRawHeaders() {
 			synchronized (genMonitor) {
 				if (rawHeaders == null) {
 					BundleEntry manifest = getBundleFile().getEntry(OSGI_BUNDLE_MANIFEST);
 					if (manifest == null) {
-						rawHeaders = new Headers<String, String>(0);
-						rawHeaders.setReadOnly();
+						rawHeaders = Collections.emptyMap();
 					} else {
 						try {
-							rawHeaders = Headers.parseManifest(manifest.getInputStream());
+							rawHeaders = Collections.unmodifiableMap(ManifestElement.parseBundleManifest(manifest.getInputStream(), new CaseInsensitiveDictionaryMap<String, String>()));
 						} catch (Exception e) {
 							if (e instanceof RuntimeException) {
 								throw (RuntimeException) e;
@@ -352,6 +367,19 @@ public final class BundleInfo {
 				return this.storageHooks;
 			}
 		}
+
+		public ModuleRevisionBuilder adaptModuleRevisionBuilder(ModuleEvent operation, Module origin, ModuleRevisionBuilder builder) {
+			List<StorageHook<?, ?>> hooks = getStorageHooks();
+			if (hooks != null) {
+				for (StorageHook<?, ?> hook : hooks) {
+					ModuleRevisionBuilder hookResult = hook.adaptModuleRevisionBuilder(operation, origin, builder);
+					if (hookResult != null) {
+						builder = hookResult;
+					}
+				}
+			}
+			return builder;
+		}
 	}
 
 	private final Storage storage;
@@ -379,7 +407,7 @@ public final class BundleInfo {
 	Generation createGeneration() throws BundleException {
 		synchronized (this.infoMonitor) {
 			if (generationLocks == null) {
-				generationLocks = new LockSet<Long>();
+				generationLocks = new LockSet<>();
 			}
 			boolean lockedID;
 			try {
@@ -502,7 +530,7 @@ public final class BundleInfo {
 
 		@Override
 		public Enumeration<String> elements() {
-			return generation.getRawHeaders().elements();
+			return Collections.enumeration(generation.getRawHeaders().values());
 		}
 
 		@Override
@@ -523,7 +551,7 @@ public final class BundleInfo {
 
 		@Override
 		public Enumeration<String> keys() {
-			return generation.getRawHeaders().keys();
+			return Collections.enumeration(generation.getRawHeaders().keySet());
 		}
 
 		@Override

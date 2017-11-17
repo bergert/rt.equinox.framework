@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2013, 2016 IBM Corporation and others.
+ * Copyright (c) 2013, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -17,32 +17,82 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import java.io.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
-import org.eclipse.osgi.container.*;
+import org.eclipse.osgi.container.Module;
 import org.eclipse.osgi.container.Module.StartOptions;
 import org.eclipse.osgi.container.Module.State;
+import org.eclipse.osgi.container.ModuleCapability;
+import org.eclipse.osgi.container.ModuleContainer;
 import org.eclipse.osgi.container.ModuleContainerAdaptor.ContainerEvent;
 import org.eclipse.osgi.container.ModuleContainerAdaptor.ModuleEvent;
+import org.eclipse.osgi.container.ModuleRequirement;
+import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleRevisionBuilder;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
 import org.eclipse.osgi.container.builders.OSGiManifestBuilderFactory;
 import org.eclipse.osgi.container.namespaces.EclipsePlatformNamespace;
 import org.eclipse.osgi.internal.debug.Debug;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
 import org.eclipse.osgi.report.resolution.ResolutionReport;
-import org.eclipse.osgi.tests.container.dummys.*;
+import org.eclipse.osgi.tests.container.dummys.DummyCollisionHook;
+import org.eclipse.osgi.tests.container.dummys.DummyContainerAdaptor;
+import org.eclipse.osgi.tests.container.dummys.DummyDebugOptions;
+import org.eclipse.osgi.tests.container.dummys.DummyModuleDatabase;
 import org.eclipse.osgi.tests.container.dummys.DummyModuleDatabase.DummyContainerEvent;
 import org.eclipse.osgi.tests.container.dummys.DummyModuleDatabase.DummyModuleEvent;
+import org.eclipse.osgi.tests.container.dummys.DummyResolverHook;
+import org.eclipse.osgi.tests.container.dummys.DummyResolverHookFactory;
 import org.eclipse.osgi.util.ManifestElement;
 import org.junit.Assert;
 import org.junit.Test;
-import org.osgi.framework.*;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.BundleReference;
+import org.osgi.framework.Constants;
+import org.osgi.framework.Version;
 import org.osgi.framework.hooks.resolver.ResolverHook;
 import org.osgi.framework.hooks.resolver.ResolverHookFactory;
-import org.osgi.framework.namespace.*;
-import org.osgi.framework.wiring.*;
+import org.osgi.framework.namespace.BundleNamespace;
+import org.osgi.framework.namespace.ExecutionEnvironmentNamespace;
+import org.osgi.framework.namespace.HostNamespace;
+import org.osgi.framework.namespace.IdentityNamespace;
+import org.osgi.framework.namespace.PackageNamespace;
+import org.osgi.framework.wiring.BundleCapability;
+import org.osgi.framework.wiring.BundleRequirement;
+import org.osgi.framework.wiring.BundleRevision;
+import org.osgi.framework.wiring.BundleWire;
 import org.osgi.resource.Namespace;
 
 public class TestModuleContainer extends AbstractTest {
@@ -1773,7 +1823,7 @@ public class TestModuleContainer extends AbstractTest {
 		Assert.assertEquals("n3 should resolve.", State.RESOLVED, uses_n3.getState());
 	}
 
-	@Test
+	// DISABLE see bug 498064 @Test
 	public void testUsesTimeout() throws BundleException {
 		// Always want to go to zero threads when idle
 		int coreThreads = 0;
@@ -1800,12 +1850,14 @@ public class TestModuleContainer extends AbstractTest {
 			}
 		};
 		ExecutorService executor = new ThreadPoolExecutor(coreThreads, maxThreads, idleTimeout, TimeUnit.SECONDS, queue, threadFactory, rejectHandler);
+		ScheduledExecutorService timeoutExecutor = new ScheduledThreadPoolExecutor(1);
 
 		Map<String, String> configuration = new HashMap<String, String>();
 		configuration.put(EquinoxConfiguration.PROP_RESOLVER_BATCH_TIMEOUT, "5000");
-		Map<String, String> debugOpts = Collections.singletonMap("org.eclipse.osgi/resolver/uses", "true");
+		Map<String, String> debugOpts = Collections.emptyMap();
 		DummyContainerAdaptor adaptor = new DummyContainerAdaptor(new DummyCollisionHook(false), configuration, new DummyResolverHookFactory(), new DummyDebugOptions(debugOpts));
 		adaptor.setResolverExecutor(executor);
+		adaptor.setTimeoutExecutor(timeoutExecutor);
 		ModuleContainer container = adaptor.getContainer();
 		for (int i = 1; i <= 1000; i++) {
 			for (Map<String, String> manifest : getUsesTimeoutManifests("test" + i)) {
@@ -1818,6 +1870,7 @@ public class TestModuleContainer extends AbstractTest {
 			Assert.assertEquals("Wrong state of module: " + module, State.RESOLVED, module.getState());
 		}
 		executor.shutdown();
+		timeoutExecutor.shutdown();
 		System.gc();
 		System.gc();
 		System.gc();
@@ -2101,7 +2154,7 @@ public class TestModuleContainer extends AbstractTest {
 	}
 
 	@Test
-	public void testNativeWithFitlerChars() throws BundleException, IOException {
+	public void testNativeWithFilterChars() throws BundleException, IOException {
 		DummyContainerAdaptor adaptor = createDummyAdaptor();
 		ModuleContainer container = adaptor.getContainer();
 
@@ -2363,19 +2416,18 @@ public class TestModuleContainer extends AbstractTest {
 		providerManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
 		providerManifest.put(Constants.BUNDLE_SYMBOLICNAME, "provider");
 		providerManifest.put(Constants.EXPORT_PACKAGE, "provider; version=1.1; attr1=attr1; attr2=attr2; dir1:=dir1; dir2:=dir2");
-		providerManifest.put(Constants.PROVIDE_CAPABILITY,
-				"provider.cap;"//
-						+ " string=sValue;"//
-						+ " string.list1:List=\"v1,v2,v3\";"//
-						+ " string.list2:List<String>=\"v4,v5,v6\";"//
-						+ " version:Version=1.1;"//
-						+ " version.list:List<Version>=\"1.0,2.0,3.0\";"//
-						+ " long:Long=12345;"//
-						+ " long.list:List<Long>=\"1,2,3\";"//
-						+ " double:Double=1.2345;"//
-						+ " double.list:List<Double>=\"1.1,1.2,1.3\";"//
-						+ " uri:uri=some.uri;" //
-						+ " set:set=\"s1,s2,s3\"");
+		providerManifest.put(Constants.PROVIDE_CAPABILITY, "provider.cap;"//
+				+ " string=sValue;"//
+				+ " string.list1:List=\"v1,v2,v3\";"//
+				+ " string.list2:List<String>=\"v4,v5,v6\";"//
+				+ " version:Version=1.1;"//
+				+ " version.list:List<Version>=\"1.0,2.0,3.0\";"//
+				+ " long:Long=12345;"//
+				+ " long.list:List<Long>=\"1,2,3\";"//
+				+ " double:Double=1.2345;"//
+				+ " double.list:List<Double>=\"1.1,1.2,1.3\";"//
+				+ " uri:uri=some.uri;" //
+				+ " set:set=\"s1,s2,s3\"");
 		Module providerModule = installDummyModule(providerManifest, "provider", container);
 		Map<String, Object> providerAttrs = providerModule.getCurrentRevision().getCapabilities("provider.cap").get(0).getAttributes();
 		assertEquals("Wrong provider attrs", attrs, providerAttrs);
@@ -2384,33 +2436,32 @@ public class TestModuleContainer extends AbstractTest {
 		requirerManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
 		requirerManifest.put(Constants.BUNDLE_SYMBOLICNAME, "requirer");
 		requirerManifest.put(Constants.IMPORT_PACKAGE, "provider; version=1.1; attr1=attr1; attr2=attr2; dir1:=dir1; dir2:=dir2");
-		requirerManifest.put(Constants.REQUIRE_CAPABILITY,
-				"optional;"//
-						+ " resolution:=optional; " //
-						+ " string=sValue;"//
-						+ " string.list1:List=\"v1,v2,v3\";"//
-						+ " string.list2:List<String>=\"v4,v5,v6\";"//
-						+ " version:Version=1.1;"//
-						+ " version.list:List<Version>=\"1.0,2.0,3.0\";"//
-						+ " long:Long=12345;"//
-						+ " long.list:List<Long>=\"1,2,3\";"//
-						+ " double:Double=1.2345;"//
-						+ " double.list:List<Double>=\"1.1,1.2,1.3\";"//
-						+ " uri:uri=some.uri;" //
-						+ " set:set=\"s1,s2,s3\"," //
-						+ "provider.cap; filter:=\"(string=sValue)\"," //
-						+ "provider.cap; filter:=\"(string.list1=v2)\"," //
-						+ "provider.cap; filter:=\"(string.list2=v5)\"," //
-						+ "provider.cap; filter:=\"(string.list2=v5)\"," //
-						+ "provider.cap; filter:=\"(&(version>=1.1)(version<=1.1.1))\"," //
-						+ "provider.cap; filter:=\"(&(version.list=1)(version.list=2))\"," //
-						+ "provider.cap; filter:=\"(long>=12344)\"," //
-						+ "provider.cap; filter:=\"(long.list=2)\"," //
-						+ "provider.cap; filter:=\"(double>=1.2)\"," //
-						+ "provider.cap; filter:=\"(double.list=1.2)\"," //
-						+ "provider.cap; filter:=\"(uri=some.uri)\"," //
-						+ "provider.cap; filter:=\"(set=s2)\"" //
-						+ "");
+		requirerManifest.put(Constants.REQUIRE_CAPABILITY, "optional;"//
+				+ " resolution:=optional; " //
+				+ " string=sValue;"//
+				+ " string.list1:List=\"v1,v2,v3\";"//
+				+ " string.list2:List<String>=\"v4,v5,v6\";"//
+				+ " version:Version=1.1;"//
+				+ " version.list:List<Version>=\"1.0,2.0,3.0\";"//
+				+ " long:Long=12345;"//
+				+ " long.list:List<Long>=\"1,2,3\";"//
+				+ " double:Double=1.2345;"//
+				+ " double.list:List<Double>=\"1.1,1.2,1.3\";"//
+				+ " uri:uri=some.uri;" //
+				+ " set:set=\"s1,s2,s3\"," //
+				+ "provider.cap; filter:=\"(string=sValue)\"," //
+				+ "provider.cap; filter:=\"(string.list1=v2)\"," //
+				+ "provider.cap; filter:=\"(string.list2=v5)\"," //
+				+ "provider.cap; filter:=\"(string.list2=v5)\"," //
+				+ "provider.cap; filter:=\"(&(version>=1.1)(version<=1.1.1))\"," //
+				+ "provider.cap; filter:=\"(&(version.list=1)(version.list=2))\"," //
+				+ "provider.cap; filter:=\"(long>=12344)\"," //
+				+ "provider.cap; filter:=\"(long.list=2)\"," //
+				+ "provider.cap; filter:=\"(double>=1.2)\"," //
+				+ "provider.cap; filter:=\"(double.list=1.2)\"," //
+				+ "provider.cap; filter:=\"(uri=some.uri)\"," //
+				+ "provider.cap; filter:=\"(set=s2)\"" //
+				+ "");
 		Module requirerModule = installDummyModule(requirerManifest, "requirer", container);
 		Map<String, Object> requirerAttrs = requirerModule.getCurrentRevision().getRequirements("optional").get(0).getAttributes();
 		assertEquals("Wrong requirer attrs", attrs, requirerAttrs);
@@ -2565,7 +2616,7 @@ public class TestModuleContainer extends AbstractTest {
 	}
 
 	@Test
-	public void testStartLevelDeadlock() throws BundleException, IOException, InterruptedException {
+	public void testStartLevelDeadlock() throws BundleException, IOException {
 		DummyContainerAdaptor adaptor = createDummyAdaptor();
 		ModuleContainer container = adaptor.getContainer();
 		container.getFrameworkStartLevel().setInitialBundleStartLevel(2);
@@ -2624,6 +2675,111 @@ public class TestModuleContainer extends AbstractTest {
 				Assert.fail("Unexpected fragment revision: " + hostWire.getRequirer());
 			}
 		}
+	}
+
+	@Test
+	public void testUnresolvedHostWithFragmentCycle() throws BundleException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install a host
+		Map<String, String> hostManifest = new HashMap<String, String>();
+		hostManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		hostManifest.put(Constants.BUNDLE_SYMBOLICNAME, "host");
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.0");
+		hostManifest.put(Constants.EXPORT_PACKAGE, "host");
+		hostManifest.put(Constants.IMPORT_PACKAGE, "host.impl");
+		installDummyModule(hostManifest, "host10", container);
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.1");
+		installDummyModule(hostManifest, "host11", container);
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.2");
+		installDummyModule(hostManifest, "host12", container);
+		//hostManifest.put(Constants.BUNDLE_VERSION, "1.3");
+		//installDummyModule(hostManifest, "host13", container);
+
+		// install a host.impl fragment
+		Map<String, String> hostImplManifest = new HashMap<String, String>();
+		hostImplManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		hostImplManifest.put(Constants.BUNDLE_SYMBOLICNAME, "host.impl");
+		hostImplManifest.put(Constants.EXPORT_PACKAGE, "host.impl");
+		hostImplManifest.put(Constants.IMPORT_PACKAGE, "host");
+		hostImplManifest.put(Constants.FRAGMENT_HOST, "host");
+		installDummyModule(hostImplManifest, "hostImpl", container);
+
+		// install an importer of host package
+		Map<String, String> hostImporterManifest = new HashMap<String, String>();
+		hostImporterManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		hostImporterManifest.put(Constants.BUNDLE_SYMBOLICNAME, "host.importer");
+		hostImporterManifest.put(Constants.IMPORT_PACKAGE, "host");
+		Module hostImporter = installDummyModule(hostImporterManifest, "hostImporter", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(hostImporter), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+	}
+
+	@Test
+	public void testMultiHostFragmentWithOverlapImport() throws BundleException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install an exporter
+		Map<String, String> exporterManifest = new HashMap<String, String>();
+		exporterManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		exporterManifest.put(Constants.BUNDLE_SYMBOLICNAME, "exporter");
+		exporterManifest.put(Constants.BUNDLE_VERSION, "1.0");
+		exporterManifest.put(Constants.EXPORT_PACKAGE, "exporter");
+		installDummyModule(exporterManifest, "exporter", container);
+
+		// install a fragment to the exporter
+		Map<String, String> exporterFragManifest = new HashMap<String, String>();
+		exporterFragManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		exporterFragManifest.put(Constants.BUNDLE_SYMBOLICNAME, "exporter.frag");
+		exporterFragManifest.put(Constants.EXPORT_PACKAGE, "exporter.frag");
+		exporterFragManifest.put(Constants.FRAGMENT_HOST, "exporter");
+		installDummyModule(exporterFragManifest, "exporter.frag", container);
+
+		// install a host that imports the exporter
+		Map<String, String> hostManifest = new HashMap<String, String>();
+		hostManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		hostManifest.put(Constants.BUNDLE_SYMBOLICNAME, "host");
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.0");
+		hostManifest.put(Constants.IMPORT_PACKAGE, "exporter");
+		installDummyModule(hostManifest, "host10", container);
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.1");
+		installDummyModule(hostManifest, "host11", container);
+		hostManifest.put(Constants.BUNDLE_VERSION, "1.2");
+		installDummyModule(hostManifest, "host12", container);
+
+		// install a fragment that also imports the exporter
+		Map<String, String> hostFragManifest = new HashMap<String, String>();
+		hostFragManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		hostFragManifest.put(Constants.BUNDLE_SYMBOLICNAME, "host.frag");
+		hostFragManifest.put(Constants.FRAGMENT_HOST, "host");
+		hostFragManifest.put(Constants.IMPORT_PACKAGE, "exporter; version=0.0");
+		Module hostFrag = installDummyModule(hostFragManifest, "host.frag", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(hostFrag), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+	}
+
+	@Test
+	public void testModuleWiringToString() throws BundleException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install a test module
+		Map<String, String> testManifest = new HashMap<String, String>();
+		testManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		testManifest.put(Constants.BUNDLE_SYMBOLICNAME, "test.name");
+		testManifest.put(Constants.BUNDLE_VERSION, "1.0");
+		Module testModule = installDummyModule(testManifest, "host10", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(testModule), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		ModuleRevision revision = testModule.getCurrentRevision();
+		ModuleWiring wiring = revision.getWiring();
+		Assert.assertEquals("Unexpected wiring.toString()", revision.toString(), wiring.toString());
 	}
 
 	@Test
@@ -2732,6 +2888,478 @@ public class TestModuleContainer extends AbstractTest {
 		List<DummyContainerEvent> events = adaptor.getDatabase().getContainerEvents();
 		for (DummyContainerEvent event : events) {
 			Assert.assertNotEquals("Found an error.", ContainerEvent.ERROR, event.type);
+		}
+	}
+
+	@Test
+	public void testSystemBundleFragmentsPackageImport() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install an system.bundle fragment that imports framework package
+		Map<String, String> systemFragManifest = new HashMap<String, String>();
+		systemFragManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest.put(Constants.IMPORT_PACKAGE, "org.osgi.framework");
+
+		Module systemFrag = installDummyModule(systemFragManifest, "systemFrag", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag), true);
+		Assert.assertNull("Failed to resolve system.bundle.", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		Assert.assertEquals("Unexpected fragment revision: " + hostWires, systemFrag.getCurrentRevision(), hostWires.get(0).getRequirer());
+
+		List<ModuleWire> systemBundleRequiredWires = systemBundle.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("No required wires expected.", 0, systemBundleRequiredWires.size());
+	}
+
+	@Test
+	public void testSystemBundleFragmentsNonPayloadRequirements() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install an system.bundle fragment that imports framework package
+		Map<String, String> systemFragManifest = new HashMap<String, String>();
+		systemFragManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest.put(Constants.REQUIRE_CAPABILITY, "osgi.ee; filter:=\"(osgi.ee=JavaSE)\"");
+
+		Module systemFrag = installDummyModule(systemFragManifest, "systemFrag", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag), true);
+		Assert.assertNull("Failed to resolve system.bundle.", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		Assert.assertEquals("Unexpected fragment revision: " + hostWires, systemFrag.getCurrentRevision(), hostWires.get(0).getRequirer());
+
+		List<ModuleWire> systemBundleRequiredWires = systemBundle.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("No required wires expected.", 0, systemBundleRequiredWires.size());
+
+		List<ModuleWire> fragRequiredWires = systemFrag.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("Wrong number of required wires.", 2, fragRequiredWires.size());
+		assertWires(fragRequiredWires, systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(null));
+	}
+
+	@Test
+	public void testSystemBundleFragmentsWithPayloadRequirements() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install an system.bundle fragment that requires a payload requirement from system.bundle
+		Map<String, String> systemFragManifest = new HashMap<String, String>();
+		systemFragManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest.put(Constants.REQUIRE_CAPABILITY, "equinox.test; filter:=\"(equinox.test=system)\"");
+
+		Module systemFrag = installDummyModule(systemFragManifest, "systemFrag", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag), true);
+		Assert.assertNull("Failed to resolve system.bundle.", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		Assert.assertEquals("Unexpected fragment revision: " + hostWires, systemFrag.getCurrentRevision(), hostWires.get(0).getRequirer());
+
+		List<ModuleWire> systemBundleRequiredWires = systemBundle.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("Wrong number of wires.", 1, systemBundleRequiredWires.size());
+		assertEquals("Wrong requirer.", systemBundle.getCurrentRevision(), systemBundleRequiredWires.get(0).getRequirer());
+		assertEquals("Wrong requirement.", systemFrag.getCurrentRevision(), systemBundleRequiredWires.get(0).getRequirement().getRevision());
+
+		List<ModuleWire> fragRequiredWires = systemFrag.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("Wrong number of required wires.", 1, fragRequiredWires.size());
+		assertWires(fragRequiredWires, hostWires);
+	}
+
+	@Test
+	public void testSystemBundleFragmentRequiresOtherFragment() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install an system.bundle fragment that provides a capability
+		Map<String, String> systemFragManifest1 = new HashMap<String, String>();
+		systemFragManifest1.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest1.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag1");
+		systemFragManifest1.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest1.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test");
+		Module systemFrag1 = installDummyModule(systemFragManifest1, "systemFrag1", container);
+
+		// install an system.bundle fragment that requires a fragment capability
+		Map<String, String> systemFragManifest2 = new HashMap<String, String>();
+		systemFragManifest2.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest2.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag2");
+		systemFragManifest2.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest2.put(Constants.REQUIRE_CAPABILITY, "fragment.capability; filter:=\"(fragment.capability=test)\"");
+		Module systemFrag2 = installDummyModule(systemFragManifest2, "systemFrag2", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag2), true);
+		Assert.assertNull("Failed to resolve system.bundle.", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 2, hostWires.size());
+
+		List<ModuleWire> systemBundleRequiredWires = systemBundle.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("Wrong number of wires.", 1, systemBundleRequiredWires.size());
+		assertEquals("Wrong requirer.", systemBundle.getCurrentRevision(), systemBundleRequiredWires.get(0).getRequirer());
+		assertEquals("Wrong requirement.", systemFrag2.getCurrentRevision(), systemBundleRequiredWires.get(0).getRequirement().getRevision());
+		assertEquals("Wrong provider.", systemBundle.getCurrentRevision(), systemBundleRequiredWires.get(0).getProvider());
+		assertEquals("Wrong capability.", systemFrag1.getCurrentRevision(), systemBundleRequiredWires.get(0).getCapability().getRevision());
+
+		List<ModuleWire> fragRequiredWires = systemFrag2.getCurrentRevision().getWiring().getRequiredModuleWires(null);
+		assertEquals("Wrong number of required wires.", 1, fragRequiredWires.size());
+		assertWires(fragRequiredWires, hostWires);
+	}
+
+	@Test
+	public void testSystemBundleFragmentRequiresOtherFragmentFailResolution() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install an system.bundle fragment that provides a capability
+		Map<String, String> systemFragManifest1 = new HashMap<String, String>();
+		systemFragManifest1.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest1.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag1");
+		systemFragManifest1.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest1.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test1");
+		Module systemFrag1 = installDummyModule(systemFragManifest1, "systemFrag1", container);
+
+		// install an system.bundle fragment that requires a fragment capability, but fails to match
+		Map<String, String> systemFragManifest2 = new HashMap<String, String>();
+		systemFragManifest2.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest2.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag2");
+		systemFragManifest2.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest2.put(Constants.REQUIRE_CAPABILITY, "fragment.capability; filter:=\"(fragment.capability=test4)\"");
+		systemFragManifest2.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test2");
+		Module systemFrag2 = installDummyModule(systemFragManifest2, "systemFrag2", container);
+
+		// install an system.bundle fragment that requires a fragment capability from a fragment that fails to resolve
+		Map<String, String> systemFragManifest3 = new HashMap<String, String>();
+		systemFragManifest3.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest3.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag3");
+		systemFragManifest3.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest3.put(Constants.REQUIRE_CAPABILITY, "fragment.capability; filter:=\"(fragment.capability=test2)\"");
+		systemFragManifest3.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test3");
+		Module systemFrag3 = installDummyModule(systemFragManifest3, "systemFrag3", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag3), true);
+		Assert.assertNotNull("Expected failure message", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		List<ModuleWire> systemFrag1HostWires = systemFrag1.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag1HostWires, hostWires);
+
+		// install a bundle that can satisfy the failed requirement, but it should not be allowed since it is not a fragment
+		Map<String, String> provideCapabilityManifest1 = new HashMap<String, String>();
+		provideCapabilityManifest1.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		provideCapabilityManifest1.put(Constants.BUNDLE_SYMBOLICNAME, "provideCapabilityBundle1");
+		provideCapabilityManifest1.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test4");
+		installDummyModule(provideCapabilityManifest1, "provideCapabilityBundle1", container);
+
+		hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		systemFrag1HostWires = systemFrag1.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag1HostWires, hostWires);
+
+		// install a fragment that satisfies the failed requirement
+		Map<String, String> systemFragManifest4 = new HashMap<String, String>();
+		systemFragManifest4.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest4.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag4");
+		systemFragManifest4.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		systemFragManifest4.put(Constants.PROVIDE_CAPABILITY, "fragment.capability; fragment.capability=test4");
+		Module systemFrag4 = installDummyModule(systemFragManifest4, "systemFrag4", container);
+
+		report = container.resolve(Arrays.asList(systemFrag3), true);
+		Assert.assertNull("Failed to resolve.", report.getResolutionException());
+
+		hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 4, hostWires.size());
+		systemFrag1HostWires = systemFrag1.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		List<ModuleWire> systemFrag2HostWires = systemFrag2.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		List<ModuleWire> systemFrag3HostWires = systemFrag3.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		List<ModuleWire> systemFrag4HostWires = systemFrag4.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag1HostWires, hostWires);
+		assertWires(systemFrag2HostWires, hostWires);
+		assertWires(systemFrag3HostWires, hostWires);
+		assertWires(systemFrag4HostWires, hostWires);
+
+		List<ModuleCapability> fragmentCapabilities = systemBundle.getCurrentRevision().getWiring().getModuleCapabilities("fragment.capability");
+		assertEquals("Wrong number of fragment capabilities.", 4, fragmentCapabilities.size());
+		// Use set since the order of required and provided wires will be different
+		Set<ModuleWire> hostRequiredFragmentCapWires = new HashSet<ModuleWire>(systemBundle.getCurrentRevision().getWiring().getRequiredModuleWires("fragment.capability"));
+		Set<ModuleWire> hostProvidedFragmentCapWires = new HashSet<ModuleWire>(systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires("fragment.capability"));
+		assertEquals("Wrong number of wires.", 2, hostProvidedFragmentCapWires.size());
+		assertEquals("Wrong wires found from host.", hostRequiredFragmentCapWires, hostProvidedFragmentCapWires);
+	}
+
+	@Test
+	public void testMultipleSystemBundleFragmentsWithSameName() throws BundleException, IOException {
+		// install the system.bundle
+		Module systemBundle = createContainerWithSystemBundle(true);
+		ModuleContainer container = systemBundle.getContainer();
+
+		// install multiple versions of the same fragment
+		Map<String, String> systemFragManifest1 = new HashMap<String, String>();
+		systemFragManifest1.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest1.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest1.put(Constants.BUNDLE_VERSION, "1.0");
+		systemFragManifest1.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		Module systemFrag1 = installDummyModule(systemFragManifest1, "systemFrag1", container);
+
+		// first attempt to resolve the lowest version before installing the others
+		ResolutionReport report = container.resolve(Arrays.asList(systemFrag1), true);
+		Assert.assertNull("Unexpected failure message", report.getResolutionException());
+
+		List<ModuleWire> hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		List<ModuleWire> systemFrag1HostWires = systemFrag1.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag1HostWires, hostWires);
+
+		Map<String, String> systemFragManifest2 = new HashMap<String, String>();
+		systemFragManifest2.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest2.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest2.put(Constants.BUNDLE_VERSION, "2.0");
+		systemFragManifest2.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		Module systemFrag2 = installDummyModule(systemFragManifest2, "systemFrag2", container);
+
+		Map<String, String> systemFragManifest3 = new HashMap<String, String>();
+		systemFragManifest3.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		systemFragManifest3.put(Constants.BUNDLE_SYMBOLICNAME, "systemFrag");
+		systemFragManifest3.put(Constants.BUNDLE_VERSION, "3.0");
+		systemFragManifest3.put(Constants.FRAGMENT_HOST, Constants.SYSTEM_BUNDLE_SYMBOLICNAME);
+		Module systemFrag3 = installDummyModule(systemFragManifest3, "systemFrag3", container);
+
+		report = container.resolve(Arrays.asList(systemFrag2), true);
+		Assert.assertNotNull("Expected failure message", report.getResolutionException());
+		report = container.resolve(Arrays.asList(systemFrag3), true);
+		Assert.assertNotNull("Expected failure message", report.getResolutionException());
+
+		hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 1, hostWires.size());
+		systemFrag1HostWires = systemFrag1.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag1HostWires, hostWires);
+
+		// uninstall the fragments so we can start over
+		container.uninstall(systemFrag1);
+		container.uninstall(systemFrag2);
+		container.uninstall(systemFrag3);
+
+		// refresh the system bundle to get only it resolved
+		report = container.refresh(Collections.singleton(systemBundle));
+		Assert.assertNull("Unexpected failure message", report.getResolutionException());
+		hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertEquals("Wrong number of fragments.", 0, hostWires.size());
+
+		// install the fragments again
+		systemFrag1 = installDummyModule(systemFragManifest1, "systemFrag1", container);
+		systemFrag2 = installDummyModule(systemFragManifest2, "systemFrag2", container);
+		systemFrag3 = installDummyModule(systemFragManifest3, "systemFrag3", container);
+
+		report = container.resolve(Arrays.asList(systemFrag1), true);
+		Assert.assertNotNull("Expected failure message", report.getResolutionException());
+		report = container.resolve(Arrays.asList(systemFrag2), true);
+		Assert.assertNotNull("Expected failure message", report.getResolutionException());
+		report = container.resolve(Arrays.asList(systemFrag3), true);
+		Assert.assertNull("Unexpected failure message", report.getResolutionException());
+
+		hostWires = systemBundle.getCurrentRevision().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
+		List<ModuleWire> systemFrag3HostWires = systemFrag3.getCurrentRevision().getWiring().getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
+		assertWires(systemFrag3HostWires, hostWires);
+	}
+
+	private Module createContainerWithSystemBundle(boolean resolveSystemBundle) throws BundleException, IOException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install the system.bundle
+		String systemCapability = "osgi.ee; osgi.ee=\"JavaSE\"; version:List<Version>=\"1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6\", equinox.test; equinox.test=system, osgi.native; osgi.native.osname=test";
+		Module systemBundle = installDummyModule("system.bundle.MF", Constants.SYSTEM_BUNDLE_LOCATION, Constants.SYSTEM_BUNDLE_SYMBOLICNAME, null, systemCapability, container);
+		if (resolveSystemBundle) {
+			ResolutionReport report = container.resolve(Collections.singleton(systemBundle), true);
+			Assert.assertNull("Found resolution exception.", report.getResolutionException());
+			Assert.assertEquals("System is not resolved.", State.RESOLVED, systemBundle.getState());
+		}
+
+		return systemBundle;
+	}
+
+	@Test
+	public void testSplitPackageUses01() throws BundleException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install a split exporter core that substitutes
+		Map<String, String> coreManifest = new HashMap<String, String>();
+		coreManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		coreManifest.put(Constants.BUNDLE_SYMBOLICNAME, "core");
+		coreManifest.put(Constants.EXPORT_PACKAGE, "pkg1; core=split; mandatory:=core");
+		coreManifest.put(Constants.IMPORT_PACKAGE, "pkg1; core=split");
+
+		// install a split exporter misc that requires core and substitutes
+		Map<String, String> miscManifest = new HashMap<String, String>();
+		miscManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		miscManifest.put(Constants.BUNDLE_SYMBOLICNAME, "misc");
+		miscManifest.put(Constants.EXPORT_PACKAGE, "pkg1; misc=split; mandatory:=misc");
+		miscManifest.put(Constants.REQUIRE_BUNDLE, "core");
+
+		// install a bundle that imports core and exports pkg2 that uses pkg1 from core
+		Map<String, String> importsCoreManifest = new HashMap<String, String>();
+		importsCoreManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		importsCoreManifest.put(Constants.BUNDLE_SYMBOLICNAME, "importsCore");
+		importsCoreManifest.put(Constants.EXPORT_PACKAGE, "pkg2; uses:=pkg1");
+		importsCoreManifest.put(Constants.IMPORT_PACKAGE, "pkg1; core=split");
+
+		// install a bundle that imports pkg2, but requires misc
+		Map<String, String> requiresMiscManifest = new HashMap<String, String>();
+		requiresMiscManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		requiresMiscManifest.put(Constants.BUNDLE_SYMBOLICNAME, "requiresMisc");
+		requiresMiscManifest.put(Constants.IMPORT_PACKAGE, "pkg2");
+		requiresMiscManifest.put(Constants.REQUIRE_BUNDLE, "misc");
+
+		installDummyModule(coreManifest, "core", container);
+		installDummyModule(miscManifest, "misc", container);
+		installDummyModule(importsCoreManifest, "importsCore", container);
+		Module requireMisc = installDummyModule(requiresMiscManifest, "requireMisc", container);
+
+		ResolutionReport report = container.resolve(Arrays.asList(requireMisc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		// now test by resolving the split exporters first
+		adaptor = createDummyAdaptor();
+		container = adaptor.getContainer();
+
+		installDummyModule(coreManifest, "core", container);
+		Module misc = installDummyModule(miscManifest, "misc", container);
+		report = container.resolve(Arrays.asList(misc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		installDummyModule(importsCoreManifest, "importsCore", container);
+		requireMisc = installDummyModule(requiresMiscManifest, "requireMisc", container);
+		report = container.resolve(Arrays.asList(requireMisc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		// now test by resolving the split exporters first with a real substitution
+		adaptor = createDummyAdaptor();
+		container = adaptor.getContainer();
+
+		// install a exporter that substitutes core's export
+		Map<String, String> substitutesCoreManifest = new HashMap<String, String>();
+		substitutesCoreManifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		substitutesCoreManifest.put(Constants.BUNDLE_SYMBOLICNAME, "substitutesCore");
+		substitutesCoreManifest.put(Constants.EXPORT_PACKAGE, "pkg1; substitutesCore=true; mandatory:=substitutesCore");
+
+		// change core's import to force it to the substitute
+		coreManifest.put(Constants.IMPORT_PACKAGE, "pkg1; substitutesCore=true");
+		importsCoreManifest.put(Constants.IMPORT_PACKAGE, "pkg1; substitutesCore=true");
+
+		installDummyModule(substitutesCoreManifest, "substitutesCore", container);
+		installDummyModule(coreManifest, "core", container);
+		misc = installDummyModule(miscManifest, "misc", container);
+		report = container.resolve(Arrays.asList(misc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		installDummyModule(importsCoreManifest, "importsCore", container);
+		requireMisc = installDummyModule(requiresMiscManifest, "requireMisc", container);
+		report = container.resolve(Arrays.asList(requireMisc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		// not test by doing a full resolve with real substitution
+		adaptor = createDummyAdaptor();
+		container = adaptor.getContainer();
+
+		installDummyModule(substitutesCoreManifest, "substitutesCore", container);
+		installDummyModule(coreManifest, "core", container);
+		installDummyModule(miscManifest, "misc", container);
+		installDummyModule(importsCoreManifest, "importsCore", container);
+		requireMisc = installDummyModule(requiresMiscManifest, "requireMisc", container);
+
+		report = container.resolve(Arrays.asList(requireMisc), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+	}
+
+	List<String> HTTPCOMPS_AND_EATHER = Arrays.asList( //
+			"org.apache.commons.codec_1.9.0.v20170208-1614.MF", //
+			"org.apache.commons.logging_1.1.1.v201101211721.MF", //
+			"org.apache.httpcomponents.httpclient_4.3.6.v201511171540.MF", //
+			"org.apache.httpcomponents.httpclient_4.5.2.v20170208-1614.MF", //
+			"org.apache.httpcomponents.httpclient_4.5.2.v20170210-0925.MF", //
+			"org.apache.httpcomponents.httpcore_4.3.3.v201411290715.MF", //
+			"org.apache.httpcomponents.httpcore_4.4.4.v20161115-1643.MF", //
+			"org.apache.httpcomponents.httpcore_4.4.6.v20170210-0925.MF", //
+			"org.eclipse.aether.api_1.0.1.v20141111.MF", //
+			"org.eclipse.aether.spi_1.0.1.v20141111.MF", //
+			"org.eclipse.aether.transport.http_1.0.1.v20141111.MF", //
+			"org.eclipse.aether.util_1.0.1.v20141111.MF");
+
+	@Test
+	public void testSubstitutionWithMoreThan2Providers() throws BundleException, IOException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		Module systemBundle = installDummyModule( //
+				"system.bundle.MF", //
+				Constants.SYSTEM_BUNDLE_LOCATION, //
+				Constants.SYSTEM_BUNDLE_SYMBOLICNAME, //
+				"javax.crypto, javax.crypto.spec, javax.net, javax.net.ssl, javax.security.auth.x500, org.ietf.jgss", //
+				"osgi.ee; osgi.ee=JavaSE; version:List<Version>=\"1.3, 1.4, 1.5, 1.6, 1.7\"", //
+				container);
+		ResolutionReport report = container.resolve(Arrays.asList(systemBundle), true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+
+		List<Module> modules = new ArrayList<Module>();
+		for (String manifest : HTTPCOMPS_AND_EATHER) {
+			modules.add(installDummyModule(manifest, manifest, container));
+		}
+		report = container.resolve(modules, true);
+		Assert.assertNull("Failed to resolve test.", report.getResolutionException());
+	}
+
+	@Test
+	public void testModuleIDSetting() throws BundleException, IOException {
+		DummyContainerAdaptor adaptor = createDummyAdaptor();
+		ModuleContainer container = adaptor.getContainer();
+
+		// install the system.bundle
+		Module systemBundle = installDummyModule("system.bundle.MF", Constants.SYSTEM_BUNDLE_LOCATION, Constants.SYSTEM_BUNDLE_SYMBOLICNAME, null, null, container);
+		ResolutionReport report = container.resolve(Arrays.asList(systemBundle), true);
+		Assert.assertNull("Failed to resolve system.bundle.", report.getResolutionException());
+
+		Map<String, String> manifest = new HashMap<String, String>();
+
+		// test by installing bundles with decreasing IDs
+		List<Module> modules = new ArrayList<Module>();
+		for (int i = 5; i > 0; i--) {
+			manifest.clear();
+			manifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+			manifest.put(Constants.BUNDLE_SYMBOLICNAME, String.valueOf(i));
+			modules.add(installDummyModule(manifest, i, manifest.get(Constants.BUNDLE_SYMBOLICNAME), container));
+		}
+
+		// test that the modules have decreasing ID starting at 5
+		long id = 5;
+		for (Module module : modules) {
+			Assert.assertEquals("Wrong ID found.", id--, module.getId().longValue());
+		}
+
+		// test that error occurs when trying to use an existing ID
+		manifest.clear();
+		manifest.put(Constants.BUNDLE_MANIFESTVERSION, "2");
+		manifest.put(Constants.BUNDLE_SYMBOLICNAME, String.valueOf("test.dup.id"));
+		try {
+			installDummyModule(manifest, 5, manifest.get(Constants.BUNDLE_SYMBOLICNAME), container);
+			fail("Expected to fail installation with duplicate ID.");
+		} catch (IllegalStateException e) {
+			// expected
 		}
 	}
 

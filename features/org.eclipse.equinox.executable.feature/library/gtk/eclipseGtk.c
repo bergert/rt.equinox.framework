@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2011 IBM Corporation and others.
+ * Copyright (c) 2000, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at 
@@ -11,7 +11,6 @@
  *     Tom Tromey (Red Hat, Inc.)
  *******************************************************************************/
 
-#include "eclipseMozilla.h"
 #include "eclipseCommon.h"
 #include "eclipseOS.h"
 #include "eclipseUtil.h"
@@ -261,7 +260,7 @@ int showSplash( const char* featureImage )
 	shellHandle = gtk.gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk.gtk_window_set_decorated((GtkWindow*)(shellHandle), FALSE);
 	gtk.gtk_window_set_type_hint((GtkWindow*)(shellHandle), 4 /*GDK_WINDOW_TYPE_HINT_SPLASHSCREEN*/);
-	gtk.g_signal_connect_data((gpointer)shellHandle, "destroy", (GtkSignalFunc)(gtk.gtk_widget_destroyed), &shellHandle, NULL, 0);
+	gtk.g_signal_connect_data((gpointer)shellHandle, "destroy", (GCallback)(gtk.gtk_widget_destroyed), &shellHandle, NULL, 0);
 		
 	pixbuf = gtk.gdk_pixbuf_new_from_file(featureImage, NULL);
 	width = gtk.gdk_pixbuf_get_width(pixbuf);
@@ -327,10 +326,6 @@ JavaResults* launchJavaVM( char* args[] )
   	pid_t   jvmProcess, finishedProcess = 0;
   	int     exitCode;
   	
-#ifdef MOZILLA_FIX
-	fixEnvForMozilla();
-#endif /* MOZILLA_FIX */
-	
 	jvmProcess = fork();
   	if (jvmProcess == 0) 
     {

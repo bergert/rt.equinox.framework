@@ -2,7 +2,7 @@
 <feature
       id="org.eclipse.equinox.executable"
       label="%featureName"
-      version="3.6.300.qualifier"
+      version="3.8.0.qualifier"
       license-feature="org.eclipse.license"
       license-feature-version="0.0.0">
 
@@ -22,40 +22,10 @@
          unpack="false"/>
 
    <plugin
-         id="org.eclipse.equinox.launcher.gtk.solaris.x86_64"
-         os="solaris"
-         ws="gtk"
-         arch="x86_64"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.solaris.sparcv9"
-         os="solaris"
-         ws="gtk"
-         arch="sparcv9"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
          id="org.eclipse.equinox.launcher.cocoa.macosx.x86_64"
          os="macosx"
          ws="cocoa"
          arch="x86_64"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.linux.ppc"
-         os="linux"
-         ws="gtk"
-         arch="ppc"
          download-size="0"
          install-size="0"
          version="0.0.0"
@@ -102,36 +72,6 @@
          fragment="true"/>
 
    <plugin
-         id="org.eclipse.equinox.launcher.gtk.aix.ppc64"
-         os="aix"
-         ws="gtk"
-         arch="ppc64"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.aix.ppc"
-         os="aix"
-         ws="gtk"
-         arch="ppc"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.hpux.ia64"
-         os="hpux"
-         ws="gtk"
-         arch="ia64"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
          id="org.eclipse.equinox.launcher.win32.win32.x86"
          os="win32"
          ws="win32"
@@ -146,26 +86,6 @@
          os="win32"
          ws="win32"
          arch="x86_64"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.linux.s390"
-         os="linux"
-         ws="gtk"
-         arch="s390"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         fragment="true"/>
-
-   <plugin
-         id="org.eclipse.equinox.launcher.gtk.linux.s390x"
-         os="linux"
-         ws="gtk"
-         arch="s390x"
          download-size="0"
          install-size="0"
          version="0.0.0"

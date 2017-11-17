@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2013, 2016 IBM Corporation and others.
+ * Copyright (c) 2013, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -15,9 +15,17 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.security.*;
-import java.util.*;
-import org.eclipse.osgi.container.*;
+import java.security.AccessController;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleCapability;
+import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
 import org.eclipse.osgi.container.namespaces.EquinoxModuleDataNamespace;
 import org.eclipse.osgi.framework.util.ArrayMap;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
@@ -26,7 +34,11 @@ import org.eclipse.osgi.internal.hookregistry.HookRegistry;
 import org.eclipse.osgi.internal.messages.Msg;
 import org.eclipse.osgi.storage.BundleInfo.Generation;
 import org.eclipse.osgi.util.NLS;
-import org.osgi.framework.*;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleActivator;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.FrameworkEvent;
 import org.osgi.framework.namespace.HostNamespace;
 import org.osgi.framework.wiring.BundleWiring;
 import org.osgi.resource.Capability;
@@ -34,7 +46,7 @@ import org.osgi.resource.Capability;
 public class FrameworkExtensionInstaller {
 	private static final ClassLoader CL = FrameworkExtensionInstaller.class.getClassLoader();
 	private static final Method ADD_FWK_URL_METHOD = findAddURLMethod(CL, "addURL"); //$NON-NLS-1$
-	private final ArrayMap<BundleActivator, Bundle> hookActivators = new ArrayMap<BundleActivator, Bundle>(5);
+	private final ArrayMap<BundleActivator, Bundle> hookActivators = new ArrayMap<>(5);
 
 	private static Method findAddURLMethod(ClassLoader cl, String name) {
 		if (cl == null)
@@ -54,6 +66,8 @@ public class FrameworkExtensionInstaller {
 			// do nothing look in super class below
 		} catch (SecurityException e) {
 			// if we do not have the permissions then we will not find the method
+		} catch (RuntimeException e) {
+			// have to avoid blowing up <clinit>
 		}
 		return findMethod(clazz.getSuperclass(), name, args);
 	}
@@ -91,8 +105,15 @@ public class FrameworkExtensionInstaller {
 	}
 
 	void addExtensionContent0(Collection<ModuleRevision> revisions, Module systemModule) throws BundleException {
-		if (CL == null || ADD_FWK_URL_METHOD == null) {
+		if (revisions.isEmpty()) {
+			// NOTE: revisions could be empty when initializing the framework with no
+			// framework extensions
 			return;
+		}
+		if (CL == null || ADD_FWK_URL_METHOD == null) {
+			// use the first revision as the blame
+			ModuleRevision revision = revisions.iterator().next();
+			throw new BundleException("Cannot support framework extension bundles without a public addURL(URL) method on the framework class loader: " + revision.getBundle()); //$NON-NLS-1$
 		}
 
 		for (ModuleRevision revision : revisions) {
@@ -139,7 +160,7 @@ public class FrameworkExtensionInstaller {
 		@SuppressWarnings("unchecked")
 		List<String> paths = metaDatas.isEmpty() ? null : (List<String>) metaDatas.get(0).getAttributes().get(EquinoxModuleDataNamespace.CAPABILITY_CLASSPATH);
 		if (paths == null) {
-			paths = new ArrayList<String>(1);
+			paths = new ArrayList<>(1);
 			paths.add("."); //$NON-NLS-1$
 		}
 		if (configuration.inDevelopmentMode()) {
@@ -148,7 +169,7 @@ public class FrameworkExtensionInstaller {
 				paths.add(devPath);
 			}
 		}
-		List<File> results = new ArrayList<File>(paths.size());
+		List<File> results = new ArrayList<>(paths.size());
 		for (String path : paths) {
 			if (".".equals(path)) { //$NON-NLS-1$
 				results.add(((Generation) revision.getRevisionInfo()).getBundleFile().getBaseFile());
@@ -189,7 +210,7 @@ public class FrameworkExtensionInstaller {
 	public void stopExtensionActivators(BundleContext context) {
 		ArrayMap<BundleActivator, Bundle> current;
 		synchronized (hookActivators) {
-			current = new ArrayMap<BundleActivator, Bundle>(hookActivators.getKeys(), hookActivators.getValues());
+			current = new ArrayMap<>(hookActivators.getKeys(), hookActivators.getValues());
 			hookActivators.clear();
 		}
 		for (BundleActivator activator : current) {

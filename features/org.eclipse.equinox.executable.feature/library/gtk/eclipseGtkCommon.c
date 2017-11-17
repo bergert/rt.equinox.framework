@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2009 IBM Corporation and others.
+ * Copyright (c) 2006, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at 
@@ -17,7 +17,6 @@
 #include <locale.h>
 #include <dlfcn.h>
 #include <stdio.h>
-#include <string.h>
 
 #define ECLIPSE_ICON  401
 
@@ -49,12 +48,8 @@ void displayMessage(char* title, char* message)
 	
     /* If GTK has not been initialized yet, do it now. */
     if (initWindowSystem( &saveArgc, saveArgv, 1 ) != 0) {
-    	printf("%s:\n%s\n", title, message);
+		printf("%s:\n%s\n", title, message);
     	return;
-    }
-
-    if (strcmp( message, _T_ECLIPSE("GTK+ Version Check")) == 0) {
-        return;
     }
 
   	dialog = gtk.gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -79,7 +74,7 @@ int initWindowSystem(int* pArgc, char* argv[], int showSplash)
     	return -1;
     
     if (getOfficialName() != NULL) 
-    	defaultArgv[0] = getOfficialName();
+		defaultArgv[0] = getOfficialName();
     
 	if (argv == NULL) {
 		/* gtk_init_check on Solaris 9 doesn't like NULL or empty argv */
@@ -95,20 +90,13 @@ int initWindowSystem(int* pArgc, char* argv[], int showSplash)
     }  
 
 	/* Initialize GTK. */
-    if (gtk.gtk_set_locale) gtk.gtk_set_locale();
-    if (gtk.gtk_init_with_args) {
-        GError *error = NULL;
-        if (!gtk.gtk_init_with_args(0, NULL, NULL, NULL, NULL, &error)) {
-            if (error) {
-                fprintf(stderr, "%s: %s\n", getOfficialName(), error->message);
-                if (gtk.g_error_free) gtk.g_error_free(error);
-            }
-            return -1;
+    GError *error = NULL;
+    if (!gtk.gtk_init_with_args(0, NULL, NULL, NULL, NULL, &error)) {
+        if (error) {
+            fprintf(stderr, "%s: %s\n", getOfficialName(), error->message);
+            gtk.g_error_free(error);
         }
-    } else {
-        if (!gtk.gtk_init_check(pArgc, &argv)) {
-        	return -1;
-        }
+        return -1;
     }
 
 	/*_gdk_set_program_class(getOfficialName());*/

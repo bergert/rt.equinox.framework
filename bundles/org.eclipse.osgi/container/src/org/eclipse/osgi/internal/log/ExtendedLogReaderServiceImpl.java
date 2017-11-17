@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2013 Cognos Incorporated, IBM Corporation and others
+ * Copyright (c) 2006, 2016 Cognos Incorporated, IBM Corporation and others
  * All rights reserved. This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License v1.0 which
  * accompanies this distribution, and is available at
@@ -10,12 +10,13 @@ package org.eclipse.osgi.internal.log;
 import java.util.*;
 import org.eclipse.equinox.log.ExtendedLogReaderService;
 import org.eclipse.equinox.log.LogFilter;
+import org.osgi.service.log.LogEntry;
 import org.osgi.service.log.LogListener;
 
 public class ExtendedLogReaderServiceImpl implements ExtendedLogReaderService {
 
 	private final ExtendedLogReaderServiceFactory factory;
-	private Set<LogListener> listeners = new HashSet<LogListener>();
+	private Set<LogListener> listeners = new HashSet<>();
 
 	ExtendedLogReaderServiceImpl(ExtendedLogReaderServiceFactory factory) {
 		this.factory = factory;
@@ -37,7 +38,7 @@ public class ExtendedLogReaderServiceImpl implements ExtendedLogReaderService {
 		addLogListener(listener, ExtendedLogReaderServiceFactory.NULL_LOGGER_FILTER);
 	}
 
-	public Enumeration getLog() {
+	public Enumeration<LogEntry> getLog() {
 		checkShutdown();
 		return factory.getLog();
 	}

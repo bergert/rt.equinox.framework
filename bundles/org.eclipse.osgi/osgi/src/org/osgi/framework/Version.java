@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OSGi Alliance (2004, 2014). All Rights Reserved.
+ * Copyright (c) OSGi Alliance (2004, 2016). All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -144,9 +144,8 @@ public class Version implements Comparable<Version> {
 				}
 			}
 		} catch (NoSuchElementException e) {
-			IllegalArgumentException iae = new IllegalArgumentException("invalid version \"" + version + "\": invalid format");
-			iae.initCause(e);
-			throw iae;
+			throw new IllegalArgumentException(
+					"invalid version \"" + version + "\": invalid format", e);
 		}
 
 		major = maj;
@@ -167,9 +166,8 @@ public class Version implements Comparable<Version> {
 		try {
 			return Integer.parseInt(value);
 		} catch (NumberFormatException e) {
-			IllegalArgumentException iae = new IllegalArgumentException("invalid version \"" + version + "\": non-numeric \"" + value + "\"");
-			iae.initCause(e);
-			throw iae;
+			throw new IllegalArgumentException("invalid version \"" + version
+					+ "\": non-numeric \"" + value + "\"", e);
 		}
 	}
 
@@ -319,7 +317,7 @@ public class Version implements Comparable<Version> {
 			return s;
 		}
 		int q = qualifier.length();
-		StringBuffer result = new StringBuffer(20 + q);
+		StringBuilder result = new StringBuilder(20 + q);
 		result.append(major);
 		result.append(SEPARATOR);
 		result.append(minor);
@@ -402,6 +400,7 @@ public class Version implements Comparable<Version> {
 	 * @throws ClassCastException If the specified object is not a
 	 *         {@code Version} object.
 	 */
+	@Override
 	public int compareTo(Version other) {
 		if (other == this) { // quicktest
 			return 0;

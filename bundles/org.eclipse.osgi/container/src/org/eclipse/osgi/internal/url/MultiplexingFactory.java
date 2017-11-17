@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2012 Cognos Incorporated, IBM Corporation and others.
+ * Copyright (c) 2006, 2016 Cognos Incorporated, IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -8,12 +8,13 @@
  *******************************************************************************/
 package org.eclipse.osgi.internal.url;
 
-import java.lang.reflect.Method;
-import java.util.LinkedList;
-import java.util.List;
+import java.lang.reflect.*;
+import java.net.URL;
+import java.util.*;
 import org.eclipse.osgi.framework.log.FrameworkLogEntry;
 import org.eclipse.osgi.internal.framework.EquinoxBundle;
 import org.eclipse.osgi.internal.framework.EquinoxContainer;
+import org.eclipse.osgi.storage.StorageUtil;
 import org.osgi.framework.*;
 
 /*
@@ -21,6 +22,46 @@ import org.osgi.framework.*;
  * handle environments running multiple osgi frameworks with the same VM.
  */
 public abstract class MultiplexingFactory {
+	/**
+	 * As a short-term (hopefully) solution we use a special class which is defined
+	 * using the Unsafe class from the VM.  This class is an implementation of
+	 * Collection<AccessibleObject> simply to provide a method add(AccessibleObject)
+	 * which turns around and calls AccessibleObject.setAccessible(true).
+	 * <p>
+	 * The reason this is needed is to hack into the VM to get deep reflective access to
+	 * the java.net package for the various hacks we have to do to multiplex the
+	 * URL and Content handlers.  Note that on Java 9 deep reflection is not possible
+	 * by default on the java.net package.
+	 * <p>
+	 * The setAccessible class will be defined in the java.base module which grants
+	 * it the ability to call setAccessible(true) on other types from the java.base module
+	 */
+	static final Collection<AccessibleObject> setAccessible;
+	static {
+		Collection<AccessibleObject> result = null;
+		try {
+			// Use reflection on Unsafe to avoid having to compile against it
+			Class<?> unsafeClass = Class.forName("sun.misc.Unsafe"); //$NON-NLS-1$
+			Field theUnsafe = unsafeClass.getDeclaredField("theUnsafe"); //$NON-NLS-1$
+
+			// NOTE: deep reflection is allowed on sun.misc package for java 9.
+			theUnsafe.setAccessible(true);
+			Object unsafe = theUnsafe.get(null);
+
+			// using defineAnonymousClass here because it seems more simple to get what we need
+			Method defineAnonymousClass = unsafeClass.getMethod("defineAnonymousClass", Class.class, byte[].class, Object[].class); //$NON-NLS-1$
+			// The SetAccessible bytes stored in a resource to avoid real loading of it (see SetAccessible.java.src for source).
+			String tResource = "SetAccessible.bytes"; //$NON-NLS-1$
+
+			byte[] bytes = StorageUtil.getBytes(MultiplexingFactory.class.getResource(tResource).openStream(), -1, 4000);
+			@SuppressWarnings("unchecked")
+			Class<Collection<AccessibleObject>> clazz = (Class<Collection<AccessibleObject>>) defineAnonymousClass.invoke(unsafe, URL.class, bytes, (Object[]) null);
+			result = clazz.getConstructor().newInstance();
+		} catch (Throwable t) {
+			// ingore as if there is no Unsafe
+		}
+		setAccessible = result;
+	}
 	protected EquinoxContainer container;
 	protected BundleContext context;
 	private List<Object> factories; // list of multiplexed factories
@@ -151,20 +192,28 @@ public abstract class MultiplexingFactory {
 		if (factories == null)
 			return null;
 
-		List<Object> released = new LinkedList<Object>(factories);
+		List<Object> released = new LinkedList<>(factories);
 		factories = null;
 		return released;
 	}
 
 	private synchronized void addFactory(Object factory) {
-		List<Object> updated = (factories == null) ? new LinkedList<Object>() : new LinkedList<Object>(factories);
+		List<Object> updated = (factories == null) ? new LinkedList<>() : new LinkedList<>(factories);
 		updated.add(factory);
 		factories = updated;
 	}
 
 	private synchronized void removeFactory(Object factory) {
-		List<Object> updated = new LinkedList<Object>(factories);
+		List<Object> updated = new LinkedList<>(factories);
 		updated.remove(factory);
 		factories = updated.isEmpty() ? null : updated;
+	}
+
+	static void setAccessible(AccessibleObject o) {
+		if (setAccessible != null) {
+			setAccessible.add(o);
+		} else {
+			o.setAccessible(true);
+		}
 	}
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2014 IBM Corporation and others.
+ * Copyright (c) 2003, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -11,10 +11,10 @@
 package org.eclipse.osgi.internal.debug;
 
 import java.io.*;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.*;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
+import org.eclipse.osgi.internal.location.LocationHelper;
 import org.eclipse.osgi.service.debug.*;
 import org.osgi.framework.*;
 import org.osgi.util.tracker.ServiceTracker;
@@ -44,7 +44,7 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 	/** A map of all the disabled options with values set at the time debug was disabled */
 	private Properties disabledOptions = null;
 	/** A cache of all of the bundles <code>DebugTrace</code> in the format <key,value> --> <bundle name, DebugTrace> */
-	protected final Map<String, DebugTrace> debugTraceCache = new HashMap<String, DebugTrace>();
+	protected final Map<String, DebugTrace> debugTraceCache = new HashMap<>();
 	/** The File object to store messages.  This value may be null. */
 	protected File outFile = null;
 	/** Is verbose debugging enabled?  Changing this value causes a new tracing session to start. */
@@ -76,14 +76,14 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 				userDir += "/"; //$NON-NLS-1$
 			debugOptionsFilename = new File(userDir, OPTIONS).toString();
 		}
-		optionsFile = buildURL(debugOptionsFilename, false);
+		optionsFile = LocationHelper.buildURL(debugOptionsFilename, false);
 		if (optionsFile == null) {
 			System.out.println("Unable to construct URL for options file: " + debugOptionsFilename); //$NON-NLS-1$
 			return;
 		}
 		System.out.print("Debug options:\n    " + optionsFile.toExternalForm()); //$NON-NLS-1$
 		try {
-			InputStream input = optionsFile.openStream();
+			InputStream input = LocationHelper.getStream(optionsFile);
 			try {
 				options.load(input);
 				System.out.println(" loaded"); //$NON-NLS-1$
@@ -104,7 +104,7 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 
 	public void start(BundleContext bc) {
 		this.context = bc;
-		listenerTracker = new ServiceTracker<DebugOptionsListener, DebugOptionsListener>(bc, DebugOptionsListener.class.getName(), this);
+		listenerTracker = new ServiceTracker<>(bc, DebugOptionsListener.class.getName(), this);
 		listenerTracker.open();
 	}
 
@@ -112,36 +112,6 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 		listenerTracker.close();
 		listenerTracker = null;
 		this.context = null;
-	}
-
-	@SuppressWarnings("deprecation")
-	private static URL buildURL(String spec, boolean trailingSlash) {
-		if (spec == null)
-			return null;
-		boolean isFile = spec.startsWith("file:"); //$NON-NLS-1$
-		try {
-			if (isFile)
-				return adjustTrailingSlash(new File(spec.substring(5)).toURL(), trailingSlash);
-			return new URL(spec);
-		} catch (MalformedURLException e) {
-			// if we failed and it is a file spec, there is nothing more we can do
-			// otherwise, try to make the spec into a file URL.
-			if (isFile)
-				return null;
-			try {
-				return adjustTrailingSlash(new File(spec).toURL(), trailingSlash);
-			} catch (MalformedURLException e1) {
-				return null;
-			}
-		}
-	}
-
-	private static URL adjustTrailingSlash(URL url, boolean trailingSlash) throws MalformedURLException {
-		String file = url.getFile();
-		if (trailingSlash == (file.endsWith("/"))) //$NON-NLS-1$
-			return url;
-		file = trailingSlash ? file + "/" : file.substring(0, file.length() - 1); //$NON-NLS-1$
-		return new URL(url.getProtocol(), url.getHost(), file);
 	}
 
 	/**
@@ -185,7 +155,7 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public Map<String, String> getOptions() {
-		Map<String, String> snapShot = new HashMap<String, String>();
+		Map<String, String> snapShot = new HashMap<>();
 		synchronized (lock) {
 			if (options != null)
 				snapShot.putAll((Map) options);
@@ -301,7 +271,7 @@ public class FrameworkDebugOptions implements DebugOptions, ServiceTrackerCustom
 				// no events to fire
 				return;
 			}
-			fireChangesTo = new HashSet<String>();
+			fireChangesTo = new HashSet<>();
 			// first check for removals
 			for (Iterator<Object> keys = options.keySet().iterator(); keys.hasNext();) {
 				String key = (String) keys.next();

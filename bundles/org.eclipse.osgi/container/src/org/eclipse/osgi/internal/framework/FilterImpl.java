@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2014 IBM Corporation and others.
+ * Copyright (c) 2003, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -15,7 +15,7 @@ import java.lang.reflect.*;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.*;
-import org.eclipse.osgi.framework.util.Headers;
+import org.eclipse.osgi.framework.util.CaseInsensitiveDictionaryMap;
 import org.eclipse.osgi.internal.debug.Debug;
 import org.eclipse.osgi.internal.messages.Msg;
 import org.eclipse.osgi.internal.serviceregistry.ServiceReferenceImpl;
@@ -161,9 +161,9 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 	 */
 	public boolean match(ServiceReference<?> reference) {
 		if (reference instanceof ServiceReferenceImpl) {
-			return matchCase(((ServiceReferenceImpl<?>) reference).getRegistration().getProperties());
+			return matches(((ServiceReferenceImpl<?>) reference).getRegistration().getProperties());
 		}
-		return matchCase(new ServiceReferenceDictionary(reference));
+		return matches(new ServiceReferenceMap(reference));
 	}
 
 	/**
@@ -179,11 +179,10 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 	 *         variants of the same key name.
 	 */
 	public boolean match(Dictionary<String, ?> dictionary) {
-		if (dictionary != null) {
-			dictionary = new Headers<String, Object>(dictionary);
+		if (dictionary == null) {
+			return matches(null);
 		}
-
-		return matchCase(dictionary);
+		return matches(new CaseInsensitiveDictionaryMap<>(dictionary));
 	}
 
 	/**
@@ -1406,7 +1405,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 
 	public List<FilterImpl> getChildren() {
 		if (value instanceof FilterImpl[]) {
-			return new ArrayList<FilterImpl>(Arrays.asList((FilterImpl[]) value));
+			return new ArrayList<>(Arrays.asList((FilterImpl[]) value));
 		}
 		return Collections.emptyList();
 	}
@@ -1416,7 +1415,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 	 * @return all the attributes contained within this filter
 	 */
 	public String[] getAttributes() {
-		List<String> results = new ArrayList<String>();
+		List<String> results = new ArrayList<>();
 		getAttributesInternal(results);
 		return results.toArray(new String[results.size()]);
 	}
@@ -1460,7 +1459,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 			try {
 				filter = parse_filter();
 			} catch (ArrayIndexOutOfBoundsException e) {
-				throw new InvalidSyntaxException(Msg.FILTER_TERMINATED_ABRUBTLY, filterstring);
+				throw new InvalidSyntaxException(Msg.FILTER_TERMINATED_ABRUBTLY, filterstring, e);
 			}
 
 			if (pos != filterChars.length) {
@@ -1525,7 +1524,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 				return parse_item();
 			}
 
-			List<FilterImpl> operands = new ArrayList<FilterImpl>(10);
+			List<FilterImpl> operands = new ArrayList<>(10);
 
 			while (filterChars[pos] == '(') {
 				FilterImpl child = parse_filter();
@@ -1544,7 +1543,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 				return parse_item();
 			}
 
-			List<FilterImpl> operands = new ArrayList<FilterImpl>(10);
+			List<FilterImpl> operands = new ArrayList<>(10);
 
 			while (filterChars[pos] == '(') {
 				FilterImpl child = parse_filter();
@@ -1685,7 +1684,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 		private Object parse_substring() throws InvalidSyntaxException {
 			StringBuffer sb = new StringBuffer(filterChars.length - pos);
 
-			List<String> operands = new ArrayList<String>(10);
+			List<String> operands = new ArrayList<>(10);
 
 			parseloop: while (true) {
 				char c = filterChars[pos];
@@ -1755,19 +1754,20 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 	}
 
 	/**
-	 * This Dictionary is used for key lookup from a ServiceReference during
-	 * filter evaluation. This Dictionary implementation only supports the get
+	 * This Map is used for key lookup from a ServiceReference during
+	 * filter evaluation. This Map implementation only supports the get
 	 * operation using a String key as no other operations are used by the
 	 * Filter implementation.
 	 * 
 	 */
-	private static class ServiceReferenceDictionary extends Dictionary<String, Object> {
+	static private final class ServiceReferenceMap extends AbstractMap<String, Object> implements Map<String, Object> {
 		private final ServiceReference<?> reference;
 
-		ServiceReferenceDictionary(ServiceReference<?> reference) {
+		ServiceReferenceMap(ServiceReference<?> reference) {
 			this.reference = reference;
 		}
 
+		@Override
 		public Object get(Object key) {
 			if (reference == null) {
 				return null;
@@ -1775,27 +1775,8 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 			return reference.getProperty((String) key);
 		}
 
-		public boolean isEmpty() {
-			throw new UnsupportedOperationException();
-		}
-
-		public Enumeration<String> keys() {
-			throw new UnsupportedOperationException();
-		}
-
-		public Enumeration<Object> elements() {
-			throw new UnsupportedOperationException();
-		}
-
-		public Object put(String key, Object value) {
-			throw new UnsupportedOperationException();
-		}
-
-		public Object remove(Object key) {
-			throw new UnsupportedOperationException();
-		}
-
-		public int size() {
+		@Override
+		public Set<Entry<String, Object>> entrySet() {
 			throw new UnsupportedOperationException();
 		}
 	}
@@ -1818,7 +1799,7 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 		private Version leftVersion;
 		private Version rightVersion;
 		private char rightRule = 0;
-		private Collection<Version> excludes = new ArrayList<Version>(0);
+		private Collection<Version> excludes = new ArrayList<>(0);
 
 		public String toString() {
 			if (rightVersion == null) {
@@ -1853,8 +1834,8 @@ public class FilterImpl implements Filter /* since Framework 1.1 */ {
 	public Map<String, String> getStandardOSGiAttributes(String... versions) {
 		if (op != AND && op != EQUAL && op != SUBSTRING && op != PRESENT)
 			throw new IllegalArgumentException("Invalid filter for Starndard OSGi Attributes: " + op); //$NON-NLS-1$
-		Map<String, String> result = new HashMap<String, String>();
-		Map<String, Range> versionAttrs = new HashMap<String, Range>();
+		Map<String, String> result = new HashMap<>();
+		Map<String, Range> versionAttrs = new HashMap<>();
 		if (versions != null) {
 			for (String versionAttr : versions) {
 				versionAttrs.put(versionAttr, null);

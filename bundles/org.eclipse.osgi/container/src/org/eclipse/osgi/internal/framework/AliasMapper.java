@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2013 IBM Corporation and others.
+ * Copyright (c) 2003, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -11,6 +11,7 @@
 package org.eclipse.osgi.internal.framework;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Map.Entry;
 import org.eclipse.osgi.internal.debug.Debug;
@@ -20,10 +21,10 @@ import org.eclipse.osgi.internal.util.Tokenizer;
  * This class maps aliases.
  */
 public class AliasMapper {
-	private static final Map<String, Collection<String>> processorAliasTable = new HashMap<String, Collection<String>>();
-	private static final Map<String, String> processorCanonicalTable = new HashMap<String, String>();
-	private static final Map<String, Collection<String>> osnameAliasTable = new HashMap<String, Collection<String>>();
-	private static final Map<String, String> osnameCanonicalTable = new HashMap<String, String>();
+	private static final Map<String, Collection<String>> processorAliasTable = new HashMap<>();
+	private static final Map<String, String> processorCanonicalTable = new HashMap<>();
+	private static final Map<String, Collection<String>> osnameAliasTable = new HashMap<>();
+	private static final Map<String, String> osnameCanonicalTable = new HashMap<>();
 	static {
 		getTables("osname.aliases", osnameAliasTable, osnameCanonicalTable); //$NON-NLS-1$
 		getTables("processor.aliases", processorAliasTable, processorCanonicalTable); //$NON-NLS-1$
@@ -65,7 +66,13 @@ public class AliasMapper {
 	}
 
 	public String getCanonicalOSName(String osname) {
-		String result = osnameCanonicalTable.get(osname.toLowerCase());
+		String lowerName = osname.toLowerCase();
+		String result = osnameCanonicalTable.get(lowerName);
+		if (result == null) {
+			if (lowerName.startsWith("windows")) { //$NON-NLS-1$
+				return "win32"; //$NON-NLS-1$
+			}
+		}
 		return result == null ? osname : result;
 	}
 
@@ -93,16 +100,11 @@ public class AliasMapper {
 	 */
 	private static Map<String, Collection<String>> initAliases(InputStream in, Map<String, Collection<String>> aliasTable, Map<String, String> canonicalTable) {
 		try {
-			BufferedReader br;
-			try {
-				br = new BufferedReader(new InputStreamReader(in, "UTF8")); //$NON-NLS-1$
-			} catch (UnsupportedEncodingException e) {
-				br = new BufferedReader(new InputStreamReader(in));
-			}
-			Map<String, Set<String>> multiMaster = new HashMap<String, Set<String>>();
+			BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+			Map<String, Set<String>> multiMaster = new HashMap<>();
 			while (true) {
 				String line = br.readLine();
-				if (line == null) /* EOF */{
+				if (line == null) /* EOF */ {
 					break; /* done */
 				}
 				Tokenizer tokenizer = new Tokenizer(line);
@@ -110,7 +112,7 @@ public class AliasMapper {
 				if (master != null) {
 					String masterLower = master.toLowerCase();
 					canonicalTable.put(masterLower, master);
-					Collection<String> aliasLine = new ArrayList<String>(1);
+					Collection<String> aliasLine = new ArrayList<>(1);
 					aliasLine.add(master);
 					parseloop: while (true) {
 						String alias = tokenizer.getString("# \t"); //$NON-NLS-1$
@@ -126,7 +128,7 @@ public class AliasMapper {
 							String existingMaster = canonicalTable.put(aliasLower, alias);
 							Set<String> masters = multiMaster.get(aliasLower);
 							if (masters == null) {
-								masters = new HashSet<String>();
+								masters = new HashSet<>();
 								multiMaster.put(aliasLower, masters);
 								masters.add(existingMaster.toLowerCase());
 							}
@@ -136,9 +138,9 @@ public class AliasMapper {
 					aliasTable.put(masterLower, aliasLine);
 				}
 			}
-			Map<String, Set<String>> multiMasterAliases = new HashMap<String, Set<String>>(multiMaster.size());
+			Map<String, Set<String>> multiMasterAliases = new HashMap<>(multiMaster.size());
 			for (Entry<String, Set<String>> entry : multiMaster.entrySet()) {
-				Set<String> aliases = new HashSet<String>();
+				Set<String> aliases = new HashSet<>();
 				for (String master : entry.getValue()) {
 					aliases.addAll(aliasTable.get(master));
 				}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OSGi Alliance (2010, 2013). All Rights Reserved.
+ * Copyright (c) OSGi Alliance (2010, 2017). All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -266,9 +266,7 @@ public final class AdaptPermission extends BasicPermission {
 		try {
 			return FrameworkUtil.createFilter(filterString);
 		} catch (InvalidSyntaxException e) {
-			IllegalArgumentException iae = new IllegalArgumentException("invalid filter");
-			iae.initCause(e);
-			throw iae;
+			throw new IllegalArgumentException("invalid filter", e);
 		}
 	}
 
@@ -443,8 +441,9 @@ public final class AdaptPermission extends BasicPermission {
 		map.put("adaptClass", getName());
 		if (bundle != null) {
 			AccessController.doPrivileged(new PrivilegedAction<Void>() {
+				@Override
 				public Void run() {
-					map.put("id", new Long(bundle.getBundleId()));
+					map.put("id", Long.valueOf(bundle.getBundleId()));
 					map.put("location", bundle.getLocation());
 					String name = bundle.getSymbolicName();
 					if (name != null) {

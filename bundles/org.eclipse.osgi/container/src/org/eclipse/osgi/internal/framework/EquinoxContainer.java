@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2015 IBM Corporation and others.
+ * Copyright (c) 2012, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -19,6 +19,7 @@ import org.eclipse.osgi.framework.log.FrameworkLogEntry;
 import org.eclipse.osgi.framework.util.SecureAction;
 import org.eclipse.osgi.internal.framework.legacy.PackageAdminImpl;
 import org.eclipse.osgi.internal.framework.legacy.StartLevelImpl;
+import org.eclipse.osgi.internal.hookregistry.ClassLoaderHook;
 import org.eclipse.osgi.internal.hookregistry.HookRegistry;
 import org.eclipse.osgi.internal.location.EquinoxLocations;
 import org.eclipse.osgi.internal.log.EquinoxLogServices;
@@ -46,6 +47,7 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 	private final Set<String> bootDelegation;
 	private final String[] bootDelegationStems;
 	private final boolean bootDelegateAll;
+	private final boolean isProcessClassRecursionSupportedByAll;
 	private final EquinoxEventPublisher eventPublisher;
 
 	private final Object monitor = new Object();
@@ -61,6 +63,7 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 	public EquinoxContainer(Map<String, ?> configuration) {
 		this.equinoxConfig = new EquinoxConfiguration(configuration, new HookRegistry(this));
 		this.logServices = new EquinoxLogServices(this.equinoxConfig);
+		this.equinoxConfig.logMessages(this.logServices);
 		this.equinoxConfig.getHookRegistry().initialize();
 		try {
 			this.storage = Storage.createStorage(this);
@@ -78,8 +81,8 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 		// TODO ideally this should be in equinox configuration or perhaps in storage
 		String bootDelegationProp = equinoxConfig.getConfiguration(Constants.FRAMEWORK_BOOTDELEGATION);
 		String[] bootPackages = ManifestElement.getArrayFromList(bootDelegationProp, ","); //$NON-NLS-1$
-		HashSet<String> exactMatch = new HashSet<String>(bootPackages.length);
-		List<String> stemMatch = new ArrayList<String>(bootPackages.length);
+		HashSet<String> exactMatch = new HashSet<>(bootPackages.length);
+		List<String> stemMatch = new ArrayList<>(bootPackages.length);
 		boolean delegateAllValue = false;
 		for (int i = 0; i < bootPackages.length; i++) {
 			if (bootPackages[i].equals("*")) { //$NON-NLS-1$
@@ -97,6 +100,13 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 		bootDelegateAll = delegateAllValue;
 		bootDelegation = exactMatch;
 		bootDelegationStems = stemMatch.isEmpty() ? null : stemMatch.toArray(new String[stemMatch.size()]);
+
+		// Detect if all hooks can support recursive class processing
+		boolean supportRecursion = true;
+		for (ClassLoaderHook hook : equinoxConfig.getHookRegistry().getClassLoaderHooks()) {
+			supportRecursion &= hook.isProcessClassRecursionSupported();
+		}
+		isProcessClassRecursionSupportedByAll = supportRecursion;
 	}
 
 	public Storage getStorage() {
@@ -143,6 +153,10 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 		return false;
 	}
 
+	public boolean isProcessClassRecursionSupportedByAll() {
+		return isProcessClassRecursionSupportedByAll;
+	}
+
 	void init() {
 		eventPublisher.init();
 		synchronized (this.monitor) {
@@ -182,7 +196,7 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 			if (EquinoxConfiguration.CONTEXTCLASSLOADER_PARENT_APP.equals(type))
 				parent = ClassLoader.getSystemClassLoader();
 			else if (EquinoxConfiguration.CONTEXTCLASSLOADER_PARENT_BOOT.equals(type))
-				parent = null;
+				parent = EquinoxContainerAdaptor.BOOT_CLASSLOADER;
 			else if (EquinoxConfiguration.CONTEXTCLASSLOADER_PARENT_FWK.equals(type))
 				parent = EquinoxContainer.class.getClassLoader();
 			else if (EquinoxConfiguration.CONTEXTCLASSLOADER_PARENT_EXT.equals(type)) {
@@ -243,7 +257,7 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 
 	void systemStart(BundleContext bc) {
 		synchronized (this.monitor) {
-			signedContentFactory = new ServiceTracker<SignedContentFactory, SignedContentFactory>(bc, SignedContentFactory.class, null);
+			signedContentFactory = new ServiceTracker<>(bc, SignedContentFactory.class, null);
 		}
 		signedContentFactory.open();
 	}
@@ -272,8 +286,13 @@ public class EquinoxContainer implements ThreadFactory, Runnable {
 
 	@Override
 	public Thread newThread(Runnable r) {
+		String type = equinoxConfig.getConfiguration(EquinoxConfiguration.PROP_ACTIVE_THREAD_TYPE, EquinoxConfiguration.ACTIVE_THREAD_TYPE_NORMAL);
 		Thread t = new Thread(r, "Active Thread: " + toString()); //$NON-NLS-1$
-		t.setDaemon(false);
+		if (EquinoxConfiguration.ACTIVE_THREAD_TYPE_NORMAL.equals(type)) {
+			t.setDaemon(false);
+		} else {
+			t.setDaemon(true);
+		}
 		t.setPriority(Thread.NORM_PRIORITY);
 		return t;
 	}

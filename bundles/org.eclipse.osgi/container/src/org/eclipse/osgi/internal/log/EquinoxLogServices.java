@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2015 IBM Corporation and others.
+ * Copyright (c) 2006, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -22,6 +22,8 @@ import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
 import org.eclipse.osgi.service.datalocation.Location;
 import org.eclipse.osgi.storage.StorageUtil;
 import org.osgi.framework.*;
+import org.osgi.service.log.LogLevel;
+import org.osgi.service.log.admin.LoggerContext;
 
 public class EquinoxLogServices {
 	static final String EQUINOX_LOGGER_NAME = "org.eclipse.equinox.logger"; //$NON-NLS-1$
@@ -48,7 +50,7 @@ public class EquinoxLogServices {
 			File configAreaDirectory = null;
 			if (configuration != null)
 				// TODO assumes the URL is a file: url
-				configAreaDirectory = new File(configuration.getURL().getFile());
+				configAreaDirectory = new File(configuration.getURL().getPath());
 
 			if (configAreaDirectory != null) {
 				logFile = new File(configAreaDirectory, logFilePath);
@@ -81,9 +83,23 @@ public class EquinoxLogServices {
 				// ignore and use 0
 			}
 		}
-		logServiceManager = new LogServiceManager(logHistoryMax, logWriter, perfWriter);
+
+		LogLevel defaultLevel = LogLevel.WARN;
+		try {
+			String defaultLevelConfig = environmentInfo.getConfiguration(LoggerContext.LOGGER_CONTEXT_DEFAULT_LOGLEVEL);
+			if (defaultLevelConfig != null) {
+				defaultLevel = LogLevel.valueOf(defaultLevelConfig);
+			}
+		} catch (IllegalArgumentException e) {
+			//ignore and use LogLevel.WARN
+		}
+
+		logServiceManager = new LogServiceManager(logHistoryMax, defaultLevel, logWriter, perfWriter);
 		eclipseLogFactory = new EquinoxLogFactory(logWriter, logServiceManager);
 		rootFrameworkLog = eclipseLogFactory.createFrameworkLog(null, logWriter);
+
+		logWriter.setLoggerAdmin(logServiceManager.getLoggerAdmin());
+		perfWriter.setLoggerAdmin(logServiceManager.getLoggerAdmin());
 	}
 
 	private ServiceRegistration<?> frameworkLogReg;
@@ -114,7 +130,7 @@ public class EquinoxLogServices {
 	private ServiceRegistration<?> registerPerformanceLog(BundleContext context) {
 		Object service = createPerformanceLog(context.getBundle());
 		String serviceName = FrameworkLog.class.getName();
-		Dictionary<String, Object> serviceProperties = new Hashtable<String, Object>(7);
+		Dictionary<String, Object> serviceProperties = new Hashtable<>(7);
 		Dictionary<String, String> headers = context.getBundle().getHeaders();
 
 		serviceProperties.put(Constants.SERVICE_VENDOR, headers.get(Constants.BUNDLE_VENDOR));

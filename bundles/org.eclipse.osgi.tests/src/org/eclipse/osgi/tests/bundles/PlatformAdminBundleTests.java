@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2007, 2014 IBM Corporation and others.
+ * Copyright (c) 2007, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -11,11 +11,15 @@
 package org.eclipse.osgi.tests.bundles;
 
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import junit.framework.Test;
 import junit.framework.TestSuite;
 import org.eclipse.osgi.service.resolver.*;
 import org.eclipse.osgi.tests.OSGiTestsActivator;
 import org.osgi.framework.*;
+import org.osgi.framework.startlevel.BundleStartLevel;
 import org.osgi.framework.wiring.FrameworkWiring;
 
 public class PlatformAdminBundleTests extends AbstractBundleTests {
@@ -130,5 +134,54 @@ public class PlatformAdminBundleTests extends AbstractBundleTests {
 		} finally {
 			r3Installer.shutdown();
 		}
+	}
+
+	public void testNativeCodeFilterWithSpecialChars() throws BundleException, InterruptedException {
+		final AtomicReference<FrameworkEvent> error = new AtomicReference<FrameworkEvent>();
+		final CountDownLatch errorCnt = new CountDownLatch(1);
+		FrameworkListener errorListener = new FrameworkListener() {
+
+			@Override
+			public void frameworkEvent(FrameworkEvent event) {
+				if (event.getType() == FrameworkEvent.ERROR) {
+					error.set(event);
+					errorCnt.countDown();
+				}
+			}
+		};
+		getContext().addFrameworkListener(errorListener);
+		try {
+			PlatformAdmin pa = installer.getPlatformAdmin();
+			State systemState = pa.getState(false);
+			// just making sure the system state is fully created first
+			assertNotNull(systemState.getBundle(0));
+			Bundle nativeTestF = installer.installBundle("nativetest.f");
+			nativeTestF.start();
+			// expecting no errors
+			errorCnt.await(5, TimeUnit.SECONDS);
+			assertNull("Found an error: " + error.get(), error.get());
+		} finally {
+			getContext().removeFrameworkListener(errorListener);
+		}
+	}
+
+	public void testTimestamp() throws BundleException {
+		PlatformAdmin pa = installer.getPlatformAdmin();
+		// get system state first to ensure it does not have the test bundle
+		State systemState = pa.getState(false);
+
+		long initialTimeStamp = systemState.getTimeStamp();
+		Bundle test = installer.installBundle("test");
+
+		assertTrue("Timestamp has not changed.", initialTimeStamp != systemState.getTimeStamp());
+
+		initialTimeStamp = systemState.getTimeStamp();
+		test.adapt(BundleStartLevel.class).setStartLevel(1000);
+
+		assertTrue("Timestamp has not changed.", initialTimeStamp == systemState.getTimeStamp());
+
+		initialTimeStamp = systemState.getTimeStamp();
+		test.uninstall();
+		assertTrue("Timestamp has not changed.", initialTimeStamp != systemState.getTimeStamp());
 	}
 }

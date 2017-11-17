@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2016 IBM Corporation and others.
+ * Copyright (c) 2012, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -13,9 +13,14 @@ package org.eclipse.osgi.tests.container.dummys;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.eclipse.osgi.container.*;
+import org.eclipse.osgi.container.Module;
 import org.eclipse.osgi.container.Module.Settings;
+import org.eclipse.osgi.container.ModuleCollisionHook;
+import org.eclipse.osgi.container.ModuleContainer;
+import org.eclipse.osgi.container.ModuleContainerAdaptor;
+import org.eclipse.osgi.container.SystemModule;
 import org.eclipse.osgi.service.debug.DebugOptions;
 import org.eclipse.osgi.tests.container.dummys.DummyModuleDatabase.DummyContainerEvent;
 import org.eclipse.osgi.tests.container.dummys.DummyModuleDatabase.DummyModuleEvent;
@@ -31,6 +36,7 @@ public class DummyContainerAdaptor extends ModuleContainerAdaptor {
 	private final ResolverHookFactory resolverHookFactory;
 	private final DebugOptions debugOptions;
 	private volatile Executor resolverExecutor;
+	private volatile ScheduledExecutorService timeoutExecutor;
 
 	public DummyContainerAdaptor(ModuleCollisionHook collisionHook, Map<String, String> configuration) {
 		this(collisionHook, configuration, new DummyResolverHookFactory());
@@ -121,6 +127,15 @@ public class DummyContainerAdaptor extends ModuleContainerAdaptor {
 			return current;
 		}
 		return super.getResolverExecutor();
+	}
+
+	public void setTimeoutExecutor(ScheduledExecutorService timeoutExecutor) {
+		this.timeoutExecutor = timeoutExecutor;
+	}
+
+	@Override
+	public ScheduledExecutorService getScheduledExecutor() {
+		return this.timeoutExecutor;
 	}
 
 }

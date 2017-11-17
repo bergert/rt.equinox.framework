@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2016 IBM Corporation and others.
+ * Copyright (c) 2005, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -63,7 +63,7 @@ public class ClasspathManager {
 	// a Map<String,String> where "libname" is the key and libpath" is the value
 	private ArrayMap<String, String> loadedLibraries = null;
 	// used to detect recusive defineClass calls for the same class on the same class loader (bug 345500)
-	private ThreadLocal<Collection<String>> currentlyDefining = new ThreadLocal<Collection<String>>();
+	private ThreadLocal<DefineContext> currentDefineContext = new ThreadLocal<>();
 
 	/**
 	 * Constructs a classpath manager for the given generation and module class loader
@@ -93,11 +93,11 @@ public class ClasspathManager {
 			return emptyFragments;
 		}
 		List<ModuleWire> fragmentWires = hostloader.getBundleLoader().getWiring().getProvidedModuleWires(HostNamespace.HOST_NAMESPACE);
-		if (fragmentWires == null) {
+		if (fragmentWires == null || fragmentWires.isEmpty()) {
 			// we don't hold locks while checking the graph, just return if no longer valid
 			return emptyFragments;
 		}
-		List<FragmentClasspath> result = new ArrayList<FragmentClasspath>(fragmentWires.size());
+		List<FragmentClasspath> result = new ArrayList<>(fragmentWires.size());
 		for (ModuleWire fragmentWire : fragmentWires) {
 			ModuleRevision revision = fragmentWire.getRequirer();
 			Generation fragGeneration = (Generation) revision.getRevisionInfo();
@@ -146,7 +146,7 @@ public class ClasspathManager {
 	}
 
 	private ClasspathEntry[] buildClasspath(String[] cp, ClasspathManager hostloader, Generation source) {
-		ArrayList<ClasspathEntry> result = new ArrayList<ClasspathEntry>(cp.length);
+		ArrayList<ClasspathEntry> result = new ArrayList<>(cp.length);
 		// add the regular classpath entries.
 		for (int i = 0; i < cp.length; i++)
 			findClassPathEntry(result, cp[i], hostloader, source);
@@ -299,7 +299,7 @@ public class ClasspathManager {
 	}
 
 	public synchronized void loadFragments(Collection<ModuleRevision> addedFragments) {
-		List<FragmentClasspath> result = new ArrayList<FragmentClasspath>(Arrays.asList(fragments));
+		List<FragmentClasspath> result = new ArrayList<>(Arrays.asList(fragments));
 
 		for (ModuleRevision addedFragment : addedFragments) {
 			Generation fragGeneration = (Generation) addedFragment.getRevisionInfo();
@@ -388,7 +388,7 @@ public class ClasspathManager {
 	 * @return an enumeration of the the requested resources
 	 */
 	public Enumeration<URL> findLocalResources(String resource) {
-		List<URL> resources = new ArrayList<URL>(6);
+		List<URL> resources = new ArrayList<>(6);
 		int classPathIndex = 0;
 		for (int i = 0; i < entries.length; i++) {
 			if (entries[i] != null) {
@@ -465,7 +465,7 @@ public class ClasspathManager {
 	 * @return an enumeration of the the requested entries or null if the entries do not exist
 	 */
 	public Enumeration<BundleEntry> findLocalEntries(String path) {
-		List<BundleEntry> objects = new ArrayList<BundleEntry>(6);
+		List<BundleEntry> objects = new ArrayList<>(6);
 		for (int i = 0; i < entries.length; i++) {
 			if (entries[i] != null) {
 				BundleEntry result = findEntryImpl(path, entries[i].getBundleFile());
@@ -574,23 +574,18 @@ public class ClasspathManager {
 			Debug.println("  defining class " + name); //$NON-NLS-1$
 		}
 
-		Collection<String> current = currentlyDefining.get();
-		if (current == null) {
-			current = new ArrayList<String>(5);
-			currentlyDefining.set(current);
-		}
-		if (current.contains(name))
-			return null; // avoid recursive defines (bug 345500)
 		try {
-			current.add(name);
 			return defineClass(name, classbytes, classpathEntry, entry, hooks);
 		} catch (Error e) {
 			if (debug.DEBUG_LOADER)
 				Debug.println("  error defining class " + name); //$NON-NLS-1$
 			throw e;
-		} finally {
-			current.remove(name);
 		}
+	}
+
+	static class DefineContext {
+		Collection<String> currentlyProcessing = new ArrayList<>(5);
+		Collection<String> currentlyDefining = new ArrayList<>(5);
 	}
 
 	/**
@@ -610,35 +605,88 @@ public class ClasspathManager {
 	 */
 	private Class<?> defineClass(String name, byte[] classbytes, ClasspathEntry classpathEntry, BundleEntry entry, List<ClassLoaderHook> hooks) {
 		DefineClassResult result = null;
+		boolean recursionDetected = false;
 		try {
 			definePackage(name, classpathEntry);
-			for (ClassLoaderHook hook : hooks) {
-				byte[] modifiedBytes = hook.processClass(name, classbytes, classpathEntry, entry, this);
-				if (modifiedBytes != null) {
-					// the WeavingHookConfigurator already calls the rejectTransformation method; avoid calling it again.
-					if (!(hook instanceof WeavingHookConfigurator)) {
-						for (ClassLoaderHook rejectHook : hooks) {
-							if (rejectHook.rejectTransformation(name, modifiedBytes, classpathEntry, entry, this)) {
-								modifiedBytes = null;
-								break;
-							}
+			DefineContext context = currentDefineContext.get();
+			if (context == null) {
+				context = new DefineContext();
+				currentDefineContext.set(context);
+			}
+
+			// First call the hooks that do not handle recursion themselves
+			if (!hookRegistry.getContainer().isProcessClassRecursionSupportedByAll()) {
+				// One or more hooks do not support recursive class processing.
+				// We need to detect recursions for this set of hooks. 
+				if (context.currentlyProcessing.contains(name)) {
+					// Avoid recursion for the same class name for these hooks
+					recursionDetected = true;
+					// TODO consider thrown a ClassCircularityError here
+					return null;
+				}
+				context.currentlyProcessing.add(name);
+				try {
+
+					for (ClassLoaderHook hook : hooks) {
+						if (!hook.isProcessClassRecursionSupported()) {
+							classbytes = processClass(hook, name, classbytes, classpathEntry, entry, this, hooks);
 						}
 					}
-					if (modifiedBytes != null) {
-						classbytes = modifiedBytes;
-					}
+				} finally {
+					context.currentlyProcessing.remove(name);
 				}
 			}
-			result = classloader.defineClass(name, classbytes, classpathEntry);
-		} finally {
-			// only pass the newly defined class to the hook
-			Class<?> defined = result != null && result.defined ? result.clazz : null;
+
+			// Now call the hooks that do support recursion without the check.
 			for (ClassLoaderHook hook : hooks) {
-				hook.recordClassDefine(name, defined, classbytes, classpathEntry, entry, this);
+				if (hook.isProcessClassRecursionSupported()) {
+					// Note if the hooks don't take protective measures for a recursive class load here
+					// it will result in a stack overflow.
+					classbytes = processClass(hook, name, classbytes, classpathEntry, entry, this, hooks);
+				}
+			}
+
+			if (context.currentlyDefining.contains(name)) {
+				// TODO consider thrown a ClassCircularityError here
+				return null; // avoid recursive defines (bug 345500)
+			}
+			context.currentlyDefining.add(name);
+			try {
+				result = classloader.defineClass(name, classbytes, classpathEntry);
+			} finally {
+				context.currentlyDefining.remove(name);
+			}
+		} finally {
+			// only call hooks if we properly called processClass above
+			if (!recursionDetected) {
+				// only pass the newly defined class to the hook
+				Class<?> defined = result != null && result.defined ? result.clazz : null;
+				for (ClassLoaderHook hook : hooks) {
+					hook.recordClassDefine(name, defined, classbytes, classpathEntry, entry, this);
+				}
 			}
 		}
 		// return either the pre-loaded class or the newly defined class
 		return result == null ? null : result.clazz;
+	}
+
+	private byte[] processClass(ClassLoaderHook hook, String name, byte[] classbytes, ClasspathEntry classpathEntry, BundleEntry entry, ClasspathManager classpathManager, List<ClassLoaderHook> hooks) {
+		byte[] modifiedBytes = hook.processClass(name, classbytes, classpathEntry, entry, this);
+		if (modifiedBytes != null) {
+			// the WeavingHookConfigurator already calls the rejectTransformation method; avoid calling it again.
+			if (!(hook instanceof WeavingHookConfigurator)) {
+				for (ClassLoaderHook rejectHook : hooks) {
+					if (rejectHook.rejectTransformation(name, modifiedBytes, classpathEntry, entry, this)) {
+						modifiedBytes = null;
+						break;
+					}
+				}
+			}
+			if (modifiedBytes != null) {
+				classbytes = modifiedBytes;
+			}
+		}
+		return classbytes;
 	}
 
 	private void definePackage(String name, ClasspathEntry classpathEntry) {
@@ -697,7 +745,7 @@ public class ClasspathManager {
 	public String findLibrary(String libname) {
 		synchronized (this) {
 			if (loadedLibraries == null)
-				loadedLibraries = new ArrayMap<String, String>(1);
+				loadedLibraries = new ArrayMap<>(1);
 		}
 		synchronized (loadedLibraries) {
 			// we assume that each classloader will load a small number of of libraries
@@ -755,7 +803,7 @@ public class ClasspathManager {
 	 * @see ModuleClassLoader#findEntries(String, String, int)
 	 */
 	public List<URL> findEntries(String path, String filePattern, int options) {
-		List<Generation> generations = new ArrayList<Generation>();
+		List<Generation> generations = new ArrayList<>();
 		// first get the host bundle file
 		generations.add(generation);
 		// next get the attached fragments bundle files
@@ -768,7 +816,7 @@ public class ClasspathManager {
 		Enumeration<URL> eURLs = Storage.findEntries(generations, path, filePattern, options);
 		if (eURLs == null)
 			return result;
-		result = new ArrayList<URL>();
+		result = new ArrayList<>();
 		while (eURLs.hasMoreElements())
 			result.add(eURLs.nextElement());
 		return Collections.unmodifiableList(result);
@@ -778,7 +826,7 @@ public class ClasspathManager {
 	 * @see ModuleClassLoader#listLocalResources(String, String, int)
 	 */
 	public Collection<String> listLocalResources(String path, String filePattern, int options) {
-		List<BundleFile> bundleFiles = new ArrayList<BundleFile>();
+		List<BundleFile> bundleFiles = new ArrayList<>();
 
 		ClasspathEntry[] cpEntries = getHostClasspathEntries();
 		for (ClasspathEntry cpEntry : cpEntries)

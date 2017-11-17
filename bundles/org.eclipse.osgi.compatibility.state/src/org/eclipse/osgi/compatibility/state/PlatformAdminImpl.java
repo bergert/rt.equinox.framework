@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2013 IBM Corporation and others. All rights reserved.
+ * Copyright (c) 2012, 2017 IBM Corporation and others. All rights reserved.
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v1.0 which accompanies this distribution,
  * and is available at http://www.eclipse.org/legal/epl-v10.html
@@ -9,15 +9,29 @@
  ******************************************************************************/
 package org.eclipse.osgi.compatibility.state;
 
-import java.util.*;
-import org.eclipse.osgi.container.*;
+import java.util.Dictionary;
+import java.util.Hashtable;
+import java.util.List;
+import java.util.Map;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleContainer;
+import org.eclipse.osgi.container.ModuleDatabase;
+import org.eclipse.osgi.container.ModuleRevision;
 import org.eclipse.osgi.internal.framework.BundleContextImpl;
 import org.eclipse.osgi.internal.framework.EquinoxContainer;
 import org.eclipse.osgi.internal.module.ResolverImpl;
 import org.eclipse.osgi.internal.resolver.StateHelperImpl;
 import org.eclipse.osgi.internal.resolver.StateObjectFactoryImpl;
-import org.eclipse.osgi.service.resolver.*;
-import org.osgi.framework.*;
+import org.eclipse.osgi.service.resolver.BundleDescription;
+import org.eclipse.osgi.service.resolver.DisabledInfo;
+import org.eclipse.osgi.service.resolver.PlatformAdmin;
+import org.eclipse.osgi.service.resolver.Resolver;
+import org.eclipse.osgi.service.resolver.State;
+import org.eclipse.osgi.service.resolver.StateHelper;
+import org.eclipse.osgi.service.resolver.StateObjectFactory;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.ServiceRegistration;
 
 public class PlatformAdminImpl implements PlatformAdmin {
 	private final StateObjectFactory factory = new StateObjectFactoryImpl();
@@ -72,7 +86,7 @@ public class PlatformAdminImpl implements PlatformAdmin {
 
 	long getTimeStamp() {
 		synchronized (this.monitor) {
-			return equinoxContainer.getStorage().getModuleDatabase().getTimestamp();
+			return equinoxContainer.getStorage().getModuleDatabase().getRevisionsTimestamp();
 		}
 	}
 
@@ -103,7 +117,7 @@ public class PlatformAdminImpl implements PlatformAdmin {
 	}
 
 	private Dictionary<String, Object> asDictionary(Map<String, ?> map) {
-		return new Hashtable<String, Object>(map);
+		return new Hashtable<>(map);
 	}
 
 	@Override

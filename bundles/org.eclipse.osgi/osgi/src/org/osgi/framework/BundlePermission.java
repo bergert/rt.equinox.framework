@@ -1,5 +1,5 @@
 /*
- * Copyright (c) OSGi Alliance (2004, 2013). All Rights Reserved.
+ * Copyright (c) OSGi Alliance (2004, 2016). All Rights Reserved.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -314,7 +314,7 @@ public final class BundlePermission extends BasicPermission {
 	public String getActions() {
 		String result = actions;
 		if (result == null) {
-			StringBuffer sb = new StringBuffer();
+			StringBuilder sb = new StringBuilder();
 			boolean comma = false;
 
 			if ((action_mask & ACTION_PROVIDE) == ACTION_PROVIDE) {

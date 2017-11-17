@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2012 Cognos Incorporated, IBM Corporation and others
+ * Copyright (c) 2006, 2016 Cognos Incorporated, IBM Corporation and others
  * All rights reserved. This program and the accompanying materials are made
  * available under the terms of the Eclipse Public License v1.0 which
  * accompanies this distribution, and is available at
@@ -13,6 +13,7 @@ import org.eclipse.equinox.log.ExtendedLogEntry;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.log.LogEntry;
+import org.osgi.service.log.LogLevel;
 
 public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 
@@ -23,6 +24,7 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 	private final String loggerName;
 	private final Bundle bundle;
 	private final int level;
+	private final LogLevel logLevelEnum;
 	private final String message;
 	private final Throwable throwable;
 	private final Object contextObject;
@@ -30,12 +32,13 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 	private final long threadId;
 	private final String threadName;
 	private final long sequenceNumber;
+	private final StackTraceElement stackTraceElement;
 
 	private static Map<Thread, Long> createThreadIdMap() {
 		try {
 			Thread.class.getMethod("getId", (Class[]) null); //$NON-NLS-1$
 		} catch (NoSuchMethodException e) {
-			return new WeakHashMap<Thread, Long>();
+			return new WeakHashMap<>();
 		}
 		return null;
 	}
@@ -52,11 +55,12 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 		return threadId.longValue();
 	}
 
-	public ExtendedLogEntryImpl(Bundle bundle, String loggerName, Object contextObject, int level, String message, Throwable throwable) {
+	public ExtendedLogEntryImpl(Bundle bundle, String loggerName, StackTraceElement stackTraceElement, Object contextObject, LogLevel logLevelEnum, int level, String message, Throwable throwable) {
 		this.time = System.currentTimeMillis();
 		this.loggerName = loggerName;
 		this.bundle = bundle;
 		this.level = level;
+		this.logLevelEnum = logLevelEnum;
 		this.message = message;
 		this.throwable = throwable;
 		this.contextObject = contextObject;
@@ -68,6 +72,8 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 			this.threadId = getId(currentThread);
 			this.sequenceNumber = nextSequenceNumber++;
 		}
+
+		this.stackTraceElement = stackTraceElement;
 	}
 
 	public String getLoggerName() {
@@ -94,6 +100,7 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 		return throwable;
 	}
 
+	@SuppressWarnings("deprecation")
 	public int getLevel() {
 		return level;
 	}
@@ -102,10 +109,9 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 		return message;
 	}
 
-	@SuppressWarnings("rawtypes")
-	public ServiceReference getServiceReference() {
+	public ServiceReference<?> getServiceReference() {
 		if (contextObject != null && contextObject instanceof ServiceReference)
-			return (ServiceReference) contextObject;
+			return (ServiceReference<?>) contextObject;
 
 		return null;
 	}
@@ -116,5 +122,25 @@ public class ExtendedLogEntryImpl implements ExtendedLogEntry, LogEntry {
 
 	public Object getContext() {
 		return contextObject;
+	}
+
+	@Override
+	public LogLevel getLogLevel() {
+		return logLevelEnum;
+	}
+
+	@Override
+	public long getSequence() {
+		return getSequenceNumber();
+	}
+
+	@Override
+	public String getThreadInfo() {
+		return getThreadName();
+	}
+
+	@Override
+	public StackTraceElement getLocation() {
+		return stackTraceElement;
 	}
 }

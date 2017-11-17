@@ -13,6 +13,7 @@ package org.eclipse.osgi.container;
 import java.io.DataInputStream;
 import java.util.EnumSet;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 import org.eclipse.osgi.container.Module.Settings;
 import org.eclipse.osgi.service.debug.DebugOptions;
 import org.osgi.framework.Constants;
@@ -293,5 +294,38 @@ public abstract class ModuleContainerAdaptor {
 				command.run();
 			}
 		};
+	}
+
+	/**
+	 * Allows a builder to be modified before it is used by the container. This gets
+	 * call when a new module is {@link ModuleContainer#install(Module, String, ModuleRevisionBuilder, Object) installed}
+	 * into the container or when an existing module is {@link ModuleContainer#update(Module, ModuleRevisionBuilder, Object) updated}
+	 * with a new revision.  The container does not call any methods on the builder before calling this method.
+	 * @param operation The lifecycle operation event that is in progress using the supplied builder. 
+	 * This will be either {@link ModuleEvent#INSTALLED installed} or {@link ModuleEvent#UPDATED updated}.
+	 * @param origin The module which originated the lifecycle operation. The origin may be {@code null} for
+	 * {@link ModuleEvent#INSTALLED installed} operations.  This is the module
+	 * passed to the {@link ModuleContainer#install(Module, String, ModuleRevisionBuilder, Object) install} or 
+	 * {@link ModuleContainer#update(Module, ModuleRevisionBuilder, Object) update} method.
+	 * @param builder the builder that will be used to create a new {@link ModuleRevision}.
+	 * @param revisionInfo the revision info that will be used for the new revision, may be {@code null}.
+	 * @return The modified builder or a completely new builder to be used by the bundle.  A {@code null} value
+	 * indicates the original builder should be used, which may have been modified by adding requirements or
+	 * capabilities.
+	 * @since 3.12
+	 */
+	public ModuleRevisionBuilder adaptModuleRevisionBuilder(ModuleEvent operation, Module origin, ModuleRevisionBuilder builder, Object revisionInfo) {
+		// do nothing by default
+		return null;
+	}
+
+	/**
+	 * Returns the scheduled executor that may be used by the
+	 * container to schedule background tasks.
+	 * @return the scheduled executor, or null if background tasks are not supported
+	 * @since 3.13
+	 */
+	public ScheduledExecutorService getScheduledExecutor() {
+		return null;
 	}
 }

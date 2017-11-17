@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2014 IBM Corporation and others.
+ * Copyright (c) 2005, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -67,7 +67,15 @@ public class ZipBundleFile extends BundleFile {
 			if (generation != null) {
 				ModuleRevision r = generation.getRevision();
 				if (r != null) {
-					generation.getBundleInfo().getStorage().getAdaptor().publishContainerEvent(ContainerEvent.ERROR, r.getRevisions().getModule(), e);
+					ContainerEvent eventType = ContainerEvent.ERROR;
+					// If the revision has been removed from the list of revisions then it has been deleted
+					// because the bundle has been uninstalled or updated
+					if (!r.getRevisions().getModuleRevisions().contains(r)) {
+						// instead of filling the log with errors about missing files from 
+						// uninstalled/updated bundles just give it an info level
+						eventType = ContainerEvent.INFO;
+					}
+					generation.getBundleInfo().getStorage().getAdaptor().publishContainerEvent(eventType, r.getRevisions().getModule(), e);
 				}
 			}
 			// TODO not sure if throwing a runtime exception is better
@@ -260,7 +268,7 @@ public class ZipBundleFile extends BundleFile {
 		if (path.length() > 0 && path.charAt(path.length() - 1) != '/')
 			path = new StringBuilder(path).append("/").toString(); //$NON-NLS-1$
 
-		LinkedHashSet<String> result = new LinkedHashSet<String>();
+		LinkedHashSet<String> result = new LinkedHashSet<>();
 		// Get all zip file entries and add the ones of interest.
 		Enumeration<? extends ZipEntry> entries = zipFile.entries();
 		while (entries.hasMoreElements()) {

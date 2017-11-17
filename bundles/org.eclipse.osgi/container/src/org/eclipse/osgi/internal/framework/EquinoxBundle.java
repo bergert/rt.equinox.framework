@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2016 IBM Corporation and others.
+ * Copyright (c) 2012, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -10,16 +10,43 @@
  *******************************************************************************/
 package org.eclipse.osgi.internal.framework;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
-import java.security.*;
+import java.security.AccessControlContext;
+import java.security.AccessController;
+import java.security.Permission;
+import java.security.PrivilegedAction;
+import java.security.ProtectionDomain;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.*;
-import org.eclipse.osgi.container.*;
-import org.eclipse.osgi.container.Module.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.EnumSet;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.Module.Settings;
+import org.eclipse.osgi.container.Module.StartOptions;
+import org.eclipse.osgi.container.Module.State;
+import org.eclipse.osgi.container.Module.StopOptions;
+import org.eclipse.osgi.container.ModuleContainer;
 import org.eclipse.osgi.container.ModuleContainerAdaptor.ContainerEvent;
 import org.eclipse.osgi.container.ModuleContainerAdaptor.ModuleEvent;
+import org.eclipse.osgi.container.ModuleLoader;
+import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
+import org.eclipse.osgi.container.SystemModule;
 import org.eclipse.osgi.framework.log.FrameworkLogEntry;
 import org.eclipse.osgi.internal.debug.Debug;
 import org.eclipse.osgi.internal.loader.BundleLoader;
@@ -28,20 +55,38 @@ import org.eclipse.osgi.internal.loader.classpath.ClasspathManager;
 import org.eclipse.osgi.internal.messages.Msg;
 import org.eclipse.osgi.internal.permadmin.EquinoxSecurityManager;
 import org.eclipse.osgi.report.resolution.ResolutionReport;
-import org.eclipse.osgi.signedcontent.*;
+import org.eclipse.osgi.signedcontent.SignedContent;
+import org.eclipse.osgi.signedcontent.SignedContentFactory;
+import org.eclipse.osgi.signedcontent.SignerInfo;
 import org.eclipse.osgi.storage.BundleInfo.Generation;
 import org.eclipse.osgi.storage.Storage;
-import org.osgi.framework.*;
-import org.osgi.framework.dto.*;
+import org.osgi.framework.AdaptPermission;
+import org.osgi.framework.AdminPermission;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.BundleReference;
+import org.osgi.framework.Constants;
+import org.osgi.framework.FrameworkEvent;
+import org.osgi.framework.FrameworkListener;
+import org.osgi.framework.ServiceReference;
+import org.osgi.framework.Version;
+import org.osgi.framework.dto.BundleDTO;
+import org.osgi.framework.dto.FrameworkDTO;
+import org.osgi.framework.dto.ServiceReferenceDTO;
 import org.osgi.framework.launch.Framework;
 import org.osgi.framework.namespace.HostNamespace;
 import org.osgi.framework.startlevel.BundleStartLevel;
 import org.osgi.framework.startlevel.FrameworkStartLevel;
 import org.osgi.framework.startlevel.dto.BundleStartLevelDTO;
 import org.osgi.framework.startlevel.dto.FrameworkStartLevelDTO;
-import org.osgi.framework.wiring.*;
+import org.osgi.framework.wiring.BundleRevision;
+import org.osgi.framework.wiring.BundleRevisions;
+import org.osgi.framework.wiring.BundleWiring;
+import org.osgi.framework.wiring.FrameworkWiring;
 import org.osgi.framework.wiring.dto.BundleRevisionDTO;
 import org.osgi.framework.wiring.dto.BundleWiringDTO;
+import org.osgi.framework.wiring.dto.FrameworkWiringDTO;
 
 public class EquinoxBundle implements Bundle, BundleReference {
 
@@ -113,7 +158,7 @@ public class EquinoxBundle implements Bundle, BundleReference {
 
 		}
 
-		final List<FrameworkListener> initListeners = new ArrayList<FrameworkListener>(0);
+		final List<FrameworkListener> initListeners = new ArrayList<>(0);
 
 		class EquinoxSystemModule extends SystemModule {
 			public EquinoxSystemModule(ModuleContainer container) {
@@ -135,7 +180,7 @@ public class EquinoxBundle implements Bundle, BundleReference {
 				String initUUID = getEquinoxContainer().getConfiguration().setConfiguration(EquinoxConfiguration.PROP_INIT_UUID, Boolean.TRUE.toString());
 				if (initUUID != null) {
 					// this is not the first framework init, need to generate a new UUID
-					getEquinoxContainer().getConfiguration().setConfiguration(Constants.FRAMEWORK_UUID, new UniversalUniqueIdentifier().toString());
+					getEquinoxContainer().getConfiguration().setConfiguration(Constants.FRAMEWORK_UUID, UUID.randomUUID().toString());
 				}
 				getEquinoxContainer().init();
 				addInitFrameworkListeners();
@@ -387,7 +432,7 @@ public class EquinoxBundle implements Bundle, BundleReference {
 		if (options == 0) {
 			return new StartOptions[0];
 		}
-		Collection<StartOptions> result = new ArrayList<Module.StartOptions>(2);
+		Collection<StartOptions> result = new ArrayList<>(2);
 		if ((options & Bundle.START_TRANSIENT) != 0) {
 			result.add(StartOptions.TRANSIENT);
 		}
@@ -564,9 +609,10 @@ public class EquinoxBundle implements Bundle, BundleReference {
 				return classLoader.loadClass(name);
 			}
 		} catch (ClassNotFoundException e) {
-			// This is an equinox-ism.  Not sure it is worth it to offer an option to disable ...
+			// This is an equinox-ism, check compatibility flag
+			boolean compatibilityLazyTrigger = equinoxContainer.getConfiguration().compatibilityLazyTriggerOnFailLoad;
 			// On failure attempt to activate lazy activating bundles.
-			if (State.LAZY_STARTING.equals(module.getState())) {
+			if (compatibilityLazyTrigger && State.LAZY_STARTING.equals(module.getState())) {
 				try {
 					module.start(StartOptions.LAZY_TRIGGER);
 				} catch (BundleException e1) {
@@ -706,14 +752,14 @@ public class EquinoxBundle implements Bundle, BundleReference {
 			}
 			if (infos.length == 0)
 				return Collections.emptyMap();
-			Map<X509Certificate, List<X509Certificate>> results = new HashMap<X509Certificate, List<X509Certificate>>(infos.length);
+			Map<X509Certificate, List<X509Certificate>> results = new HashMap<>(infos.length);
 			for (int i = 0; i < infos.length; i++) {
 				if (signersType == SIGNERS_TRUSTED && !infos[i].isTrusted())
 					continue;
 				Certificate[] certs = infos[i].getCertificateChain();
 				if (certs == null || certs.length == 0)
 					continue;
-				List<X509Certificate> certChain = new ArrayList<X509Certificate>();
+				List<X509Certificate> certChain = new ArrayList<>();
 				for (int j = 0; j < certs.length; j++)
 					certChain.add((X509Certificate) certs[j]);
 				results.put((X509Certificate) certs[0], certChain);
@@ -853,11 +899,11 @@ public class EquinoxBundle implements Bundle, BundleReference {
 			}
 
 			if (FrameworkStartLevel.class.equals(adapterType)) {
-				return (A) equinoxContainer.getStorage().getModuleContainer().getFrameworkStartLevel();
+				return (A) module.getContainer().getFrameworkStartLevel();
 			}
 
 			if (FrameworkWiring.class.equals(adapterType)) {
-				return (A) equinoxContainer.getStorage().getModuleContainer().getFrameworkWiring();
+				return (A) module.getContainer().getFrameworkWiring();
 			}
 
 			if (FrameworkDTO.class.equals(adapterType)) {
@@ -872,7 +918,31 @@ public class EquinoxBundle implements Bundle, BundleReference {
 			}
 
 			if (FrameworkStartLevelDTO.class.equals(adapterType)) {
-				return (A) DTOBuilder.newFrameworkStartLevelDTO(equinoxContainer.getStorage().getModuleContainer().getFrameworkStartLevel());
+				return (A) DTOBuilder.newFrameworkStartLevelDTO(module.getContainer().getFrameworkStartLevel());
+			}
+
+			if (FrameworkWiringDTO.class.equals(adapterType)) {
+				readLock();
+				try {
+					Set<BundleWiring> allWirings = new HashSet<>();
+					for (Module m : module.getContainer().getModules()) {
+						for (BundleRevision revision : m.getRevisions().getRevisions()) {
+							BundleWiring wiring = revision.getWiring();
+							if (wiring != null) {
+								allWirings.add(wiring);
+							}
+						}
+					}
+					for (ModuleRevision revision : module.getContainer().getRemovalPending()) {
+						BundleWiring wiring = revision.getWiring();
+						if (wiring != null) {
+							allWirings.add(wiring);
+						}
+					}
+					return (A) DTOBuilder.newFrameworkWiringDTO(allWirings);
+				} finally {
+					readUnlock();
+				}
 			}
 		}
 
@@ -961,7 +1031,7 @@ public class EquinoxBundle implements Bundle, BundleReference {
 	}
 
 	List<Generation> getGenerations() {
-		List<Generation> result = new ArrayList<Generation>();
+		List<Generation> result = new ArrayList<>();
 		ModuleRevision current = getModule().getCurrentRevision();
 		result.add((Generation) current.getRevisionInfo());
 		ModuleWiring wiring = current.getWiring();

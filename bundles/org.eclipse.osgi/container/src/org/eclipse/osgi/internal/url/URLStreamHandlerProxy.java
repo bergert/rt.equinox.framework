@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2015 IBM Corporation and others.
+ * Copyright (c) 2003, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -55,7 +55,7 @@ public class URLStreamHandlerProxy extends URLStreamHandler implements ServiceTr
 		//set the handler and ranking
 		setNewHandler(reference, getRank(reference));
 
-		urlStreamHandlerServiceTracker = new ServiceTracker<URLStreamHandlerService, ServiceReference<URLStreamHandlerService>>(context, URLStreamHandlerFactoryImpl.URLSTREAMHANDLERCLASS, this);
+		urlStreamHandlerServiceTracker = new ServiceTracker<>(context, URLStreamHandlerFactoryImpl.URLSTREAMHANDLERCLASS, this);
 		URLStreamHandlerFactoryImpl.secureAction.open(urlStreamHandlerServiceTracker);
 	}
 
@@ -224,6 +224,7 @@ public class URLStreamHandlerProxy extends URLStreamHandler implements ServiceTr
 	protected URLConnection openConnection(URL u, Proxy p) throws IOException {
 		try {
 			Method openConn = realHandlerService.getClass().getMethod("openConnection", new Class[] {URL.class, Proxy.class}); //$NON-NLS-1$
+			openConn.setAccessible(true);
 			return (URLConnection) openConn.invoke(realHandlerService, new Object[] {u, p});
 		} catch (InvocationTargetException e) {
 			if (e.getTargetException() instanceof IOException)
@@ -231,7 +232,7 @@ public class URLStreamHandlerProxy extends URLStreamHandler implements ServiceTr
 			throw (RuntimeException) e.getTargetException();
 		} catch (Exception e) {
 			// expected on JRE < 1.5
-			throw (UnsupportedOperationException) new UnsupportedOperationException().initCause(e);
+			throw new UnsupportedOperationException(e);
 		}
 	}
 }

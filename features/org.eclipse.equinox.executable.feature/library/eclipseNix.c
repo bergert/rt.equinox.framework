@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2008, 2009 IBM Corporation and others.
+ * Copyright (c) 2008, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at 
@@ -12,7 +12,6 @@
 /* This file contains code common between GTK & Motif */
 #include "eclipseOS.h"
 #include "eclipseCommon.h"
-#include "eclipseMozilla.h"
 #include "eclipseUtil.h"
 #include "eclipseJNI.h"
 
@@ -56,9 +55,6 @@ static const char* jvmLocations [] = { "j9vm", "../jre/bin/j9vm",
 
 static void adjustLibraryPath( char * vmLibrary );
 static char * findLib(char * command);
-#ifdef NETSCAPE_FIX
-extern void   fixEnvForNetscape();
-#endif /* NETSCAPE_FIX */
 
 char * findVMLibrary( char* command ) {
 	char * lib = findLib(command);
@@ -118,12 +114,6 @@ static void adjustLibraryPath( char * vmLibrary ) {
 	int needAdjust = 0;
 	
 	char ** paths = NULL;
-#ifdef MOZILLA_FIX
-	fixEnvForMozilla();
-#endif /* MOZILLA_FIX */
-#ifdef NETSCAPE_FIX
-	fixEnvForNetscape();
-#endif /* NETSCAPE_FIX */
 	
 	paths = getVMLibrarySearchPath(vmLibrary);
  
@@ -174,7 +164,8 @@ JavaResults* startJavaVM( _TCHAR* libPath, _TCHAR* vmArgs[], _TCHAR* progArgs[],
 	return startJavaJNI(libPath, vmArgs, progArgs, jarFile);
 }
 
-int isMaxPermSizeVM( _TCHAR * javaVM, _TCHAR * jniLib ) {
+/* returns 1 if the JVM version is >= 9, 0 otherwise */
+int isModularVM( _TCHAR * javaVM, _TCHAR * jniLib ) {
 	if (javaVM == NULL) {
 		return 0;
 	}
@@ -200,22 +191,17 @@ int isMaxPermSizeVM( _TCHAR * javaVM, _TCHAR * jniLib ) {
 				version[numChars] = '\0';
 			}
 		}
-		if (_tcsstr(buffer, "Java HotSpot(TM)") || _tcsstr(buffer, "OpenJDK")) {
-			if (version != NULL) {
-				_TCHAR *value = _tcstok(version, ".");
-				if (value != NULL && (_tcstol(value, NULL, 10) == 1)) {
-					value = _tcstok(NULL, ".");
-					if (_tcstol(value, NULL, 10) < 8) {
-						result = 1;
-					}
-				}
+		if (version != NULL) {
+			_TCHAR *str = version;
+			/* According to the new Java version-string scheme, the first element is
+			 * the major version number, details at http://openjdk.java.net/jeps/223 */
+			_TCHAR *majorVersion = _tcstok(str, ".-");
+			if (majorVersion != NULL && (_tcstol(majorVersion, NULL, 10) >= 9)) {
+				result = 1;
 			}
-			break;
+			free(version);
 		}
-		if (_tcsstr(buffer, "IBM") != NULL) {
-			result = 0;
-			break;
-		}
+		break;
 	}
 	pclose(fp);
 	return result;

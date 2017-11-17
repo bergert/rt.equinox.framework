@@ -94,7 +94,7 @@ public class SignedBundleHook implements ActivatorHookFactory, BundleFileWrapper
 			// initialize the trust engine listener only if trust is being established with a trust engine
 			trustEngineListener = new TrustEngineListener(context, this);
 		// always register the trust engine
-		Dictionary<String, Object> trustEngineProps = new Hashtable<String, Object>(7);
+		Dictionary<String, Object> trustEngineProps = new Hashtable<>(7);
 		trustEngineProps.put(Constants.SERVICE_RANKING, Integer.valueOf(Integer.MIN_VALUE));
 		trustEngineProps.put(SignedContentConstants.TRUST_ENGINE, SignedContentConstants.DEFAULT_TRUST_ENGINE);
 		KeyStoreTrustEngine systemTrustEngine = new KeyStoreTrustEngine(CACERTS_PATH, CACERTS_TYPE, null, "System", this); //$NON-NLS-1$
@@ -106,7 +106,7 @@ public class SignedBundleHook implements ActivatorHookFactory, BundleFileWrapper
 				if ("file".equals(url.getProtocol())) { //$NON-NLS-1$
 					trustEngineProps.put(SignedContentConstants.TRUST_ENGINE, OSGI_KEYSTORE);
 					String path = url.getPath();
-					osgiTrustEngineReg = new ArrayList<ServiceRegistration<?>>(1);
+					osgiTrustEngineReg = new ArrayList<>(1);
 					osgiTrustEngineReg.add(context.registerService(TrustEngine.class.getName(), new KeyStoreTrustEngine(path, CACERTS_TYPE, null, OSGI_KEYSTORE, this), trustEngineProps));
 				}
 			} catch (MalformedURLException e) {
@@ -117,7 +117,7 @@ public class SignedBundleHook implements ActivatorHookFactory, BundleFileWrapper
 			if (osgiTrustRepoPaths != null) {
 				trustEngineProps.put(SignedContentConstants.TRUST_ENGINE, Constants.FRAMEWORK_TRUST_REPOSITORIES);
 				StringTokenizer st = new StringTokenizer(osgiTrustRepoPaths, File.pathSeparator);
-				osgiTrustEngineReg = new ArrayList<ServiceRegistration<?>>(1);
+				osgiTrustEngineReg = new ArrayList<>(1);
 				while (st.hasMoreTokens()) {
 					String trustRepoPath = st.nextToken();
 					osgiTrustEngineReg.add(context.registerService(TrustEngine.class.getName(), new KeyStoreTrustEngine(trustRepoPath, CACERTS_TYPE, null, OSGI_KEYSTORE, this), trustEngineProps));
@@ -217,13 +217,13 @@ public class SignedBundleHook implements ActivatorHookFactory, BundleFileWrapper
 		try {
 			result.initializeSignedContent();
 		} catch (InvalidKeyException e) {
-			throw (InvalidKeyException) new InvalidKeyException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content)).initCause(e);
+			throw new InvalidKeyException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content), e);
 		} catch (SignatureException e) {
-			throw (SignatureException) new SignatureException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content)).initCause(e);
+			throw new SignatureException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content), e);
 		} catch (CertificateException e) {
-			throw (CertificateException) new CertificateException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content)).initCause(e);
+			throw new CertificateException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content), e);
 		} catch (NoSuchAlgorithmException e) {
-			throw (NoSuchAlgorithmException) new NoSuchAlgorithmException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content)).initCause(e);
+			throw new NoSuchAlgorithmException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content), e);
 		} catch (NoSuchProviderException e) {
 			throw (NoSuchProviderException) new NoSuchProviderException(NLS.bind(SignedContentMessages.Factory_SignedContent_Error, content)).initCause(e);
 		}
@@ -280,9 +280,9 @@ public class SignedBundleHook implements ActivatorHookFactory, BundleFileWrapper
 					log("Invalid trust engine filter", FrameworkLogEntry.WARNING, e); //$NON-NLS-1$
 				}
 			if (filter != null) {
-				trustEngineTracker = new ServiceTracker<TrustEngine, TrustEngine>(context, filter, new TrustEngineCustomizer());
+				trustEngineTracker = new ServiceTracker<>(context, filter, new TrustEngineCustomizer());
 			} else
-				trustEngineTracker = new ServiceTracker<TrustEngine, TrustEngine>(context, TrustEngine.class.getName(), new TrustEngineCustomizer());
+				trustEngineTracker = new ServiceTracker<>(context, TrustEngine.class.getName(), new TrustEngineCustomizer());
 			trustEngineTracker.open();
 		}
 		Object[] services = trustEngineTracker.getServices();

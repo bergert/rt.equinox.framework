@@ -13,7 +13,6 @@ package org.eclipse.osgi.internal.loader;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.*;
@@ -50,23 +49,13 @@ public abstract class ModuleClassLoader extends ClassLoader implements BundleRef
 	 * A PermissionCollection for AllPermissions; shared across all ProtectionDomains when security is disabled
 	 */
 	protected static final PermissionCollection ALLPERMISSIONS;
-	protected static final boolean REGISTERED_AS_PARALLEL;
+	protected static final boolean REGISTERED_AS_PARALLEL = ClassLoader.registerAsParallelCapable();
 
 	static {
 		AllPermission allPerm = new AllPermission();
 		ALLPERMISSIONS = allPerm.newPermissionCollection();
 		if (ALLPERMISSIONS != null)
 			ALLPERMISSIONS.add(allPerm);
-		boolean registeredAsParallel;
-		try {
-			Method parallelCapableMetod = ClassLoader.class.getDeclaredMethod("registerAsParallelCapable", (Class[]) null); //$NON-NLS-1$
-			parallelCapableMetod.setAccessible(true);
-			registeredAsParallel = ((Boolean) parallelCapableMetod.invoke(null, (Object[]) null)).booleanValue();
-		} catch (Throwable e) {
-			// must do everything to avoid failing in clinit
-			registeredAsParallel = false;
-		}
-		REGISTERED_AS_PARALLEL = registeredAsParallel;
 	}
 
 	/**
@@ -91,7 +80,7 @@ public abstract class ModuleClassLoader extends ClassLoader implements BundleRef
 		}
 	}
 
-	private final Map<String, Thread> classNameLocks = new HashMap<String, Thread>(5);
+	private final Map<String, Thread> classNameLocks = new HashMap<>(5);
 	private final Object pkgLock = new Object();
 
 	/**
@@ -180,6 +169,15 @@ public abstract class ModuleClassLoader extends ClassLoader implements BundleRef
 		}
 	}
 
+	// preparing for Java 9
+	protected Class<?> findClass(String moduleName, String name) {
+		try {
+			return findLocalClass(name);
+		} catch (ClassNotFoundException e) {
+			return null;
+		}
+	}
+
 	@Override
 	protected Class<?> findClass(String name) throws ClassNotFoundException {
 		return findLocalClass(name);
@@ -208,6 +206,11 @@ public abstract class ModuleClassLoader extends ClassLoader implements BundleRef
 		}
 
 		return (null);
+	}
+
+	// preparing for Java 9
+	protected URL findResource(String moduleName, String name) {
+		return findLocalResource(name);
 	}
 
 	@Override

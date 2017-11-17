@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2004, 2015 IBM Corporation and others.
+ * Copyright (c) 2004, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -13,9 +13,21 @@ package org.eclipse.osgi.storage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.util.*;
-import org.eclipse.osgi.container.*;
-import org.eclipse.osgi.framework.util.Headers;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.Hashtable;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map.Entry;
+import java.util.MissingResourceException;
+import java.util.PropertyResourceBundle;
+import java.util.ResourceBundle;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
+import org.eclipse.osgi.framework.util.CaseInsensitiveDictionaryMap;
 import org.eclipse.osgi.storage.BundleInfo.Generation;
 import org.osgi.framework.Constants;
 import org.osgi.framework.namespace.HostNamespace;
@@ -29,7 +41,7 @@ public class ManifestLocalization {
 	private final Generation generation;
 	private final Dictionary<String, String> rawHeaders;
 	private volatile Dictionary<String, String> defaultLocaleHeaders = null;
-	private final Hashtable<String, BundleResourceBundle> cache = new Hashtable<String, BundleResourceBundle>(5);
+	private final Hashtable<String, BundleResourceBundle> cache = new Hashtable<>(5);
 
 	public ManifestLocalization(Generation generation, Dictionary<String, String> rawHeaders, String defaultRoot) {
 		this.generation = generation;
@@ -61,11 +73,9 @@ public class ManifestLocalization {
 			return rawHeaders;
 		}
 		ResourceBundle localeProperties = getResourceBundle(localeString, isDefaultLocale);
-		Enumeration<String> eKeys = this.rawHeaders.keys();
-		Headers<String, String> localeHeaders = new Headers<String, String>(this.rawHeaders.size());
-		while (eKeys.hasMoreElements()) {
-			String key = eKeys.nextElement();
-			String value = this.rawHeaders.get(key);
+		CaseInsensitiveDictionaryMap<String, String> localeHeaders = new CaseInsensitiveDictionaryMap<>(this.rawHeaders);
+		for (Entry<String, String> entry : localeHeaders.entrySet()) {
+			String value = entry.getValue();
 			if (value.startsWith("%") && (value.length() > 1)) { //$NON-NLS-1$
 				String propertiesKey = value.substring(1);
 				try {
@@ -73,18 +83,18 @@ public class ManifestLocalization {
 				} catch (MissingResourceException ex) {
 					value = propertiesKey;
 				}
+				entry.setValue(value);
 			}
-			localeHeaders.set(key, value);
 		}
-		localeHeaders.setReadOnly();
+		Dictionary<String, String> result = localeHeaders.asUnmodifiableDictionary();
 		if (isDefaultLocale) {
-			defaultLocaleHeaders = localeHeaders;
+			defaultLocaleHeaders = result;
 		}
-		return (localeHeaders);
+		return result;
 	}
 
 	private String[] buildNLVariants(String nl) {
-		List<String> result = new ArrayList<String>();
+		List<String> result = new ArrayList<>();
 		while (nl.length() > 0) {
 			result.add(nl);
 			int i = nl.lastIndexOf('_');

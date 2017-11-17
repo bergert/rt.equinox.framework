@@ -64,7 +64,7 @@
  *  -vm <javaVM>               the Java VM to be used
  *  -os <opSys>                the operating system being run on
  *  -arch <osArch>             the hardware architecture of the OS: x86, sparc, hp9000
- *  -ws <gui>                  the window system to be used: win32, motif, gtk, ...
+ *  -ws <gui>                  the window system to be used: win32, gtk, cocoa, ...
  *  -nosplash                  do not display the splash screen. The java application will
  *                             not receive the -showsplash command.
  *  -showsplash <bitmap>	   show the given bitmap in the splash screen.
@@ -168,6 +168,8 @@
 #include <errno.h>
 #include <ctype.h>
 
+#include "eclipse-memcpy.h"
+
 #define MAX_PATH_LENGTH   2000
 #define MAX_SHARED_LENGTH   (16 * 1024)
 
@@ -202,7 +204,6 @@ static _TCHAR* returnCodeMsg = _T_ECLIPSE("Java was started but returned exit co
 static _TCHAR* goVMMsg = _T_ECLIPSE("Start VM: %s\n");
 static _TCHAR* pathMsg = _T_ECLIPSE("%s in your current PATH");
 static _TCHAR* shareMsg = _T_ECLIPSE("No exit data available.");
-static _TCHAR* gtkCheck = _T_ECLIPSE("GTK+ Version Check");
 static _TCHAR* noVMMsg =
 _T_ECLIPSE("A Java Runtime Environment (JRE) or Java Development Kit (JDK)\n\
 must be available in order to run %s. No Java virtual machine\n\
@@ -251,6 +252,7 @@ home directory.");
 #define PERM_GEN	  _T_ECLIPSE("--launcher.XXMaxPermSize")
 
 #define XXPERMGEN	  _T_ECLIPSE("-XX:MaxPermSize=")
+#define ADDMODULES	  _T_ECLIPSE("--add-modules")
 #define ACTION_OPENFILE _T_ECLIPSE("openFile")
 #define GTK_VERSION   _T_ECLIPSE("--launcher.GTK_version")
 
@@ -270,6 +272,9 @@ static int     noSplash      = 0;				/* True: do not show splash win	*/
 static int	   suppressErrors = 0;				/* True: do not display errors dialogs */
        int     secondThread  = 0;				/* True: start the VM on a second thread */
 static int     appendVmargs = 0;                /* True: append cmdline vmargs to launcher.ini vmargs */
+#ifdef MACOSX
+static int     skipJava9ParamRemoval		 = 0;		/* Set to true only on macOS, if -vm was present on commandline or in eclipse.ini and points to a shared lib */
+#endif
 
 static _TCHAR*  showSplashArg = NULL;			/* showsplash data (main launcher window) */
 static _TCHAR*  splashBitmap  = NULL;			/* the actual splash bitmap */
@@ -618,7 +623,12 @@ static int _run(int argc, _TCHAR* argv[], _TCHAR* vmArgs[])
 
 #ifndef _WIN32
 #ifndef MACOSX
-    displayMessage( officialName, gtkCheck );
+    if ((!suppressErrors) && (!noSplash)) {
+	char *display = getenv("DISPLAY");
+        if (display != NULL) {
+            initWindowSystem( &argc, argv, 1);
+        }
+    }
 #endif
 #endif
 	/* the startup jarFile goes on the classpath */
@@ -1029,28 +1039,41 @@ static _TCHAR** mergeConfigurationFilesVMArgs() {
 }
 
 static void adjustVMArgs(_TCHAR *javaVM, _TCHAR *jniLib, _TCHAR **vmArgv[]) {
-	/* Sun/Oracle VMs below version 8 need some extra perm gen space */
-	/* Detecting Sun VM is expensive - only do so if necessary */
-	if (permGen != NULL) {
-		int specified = 0, i = -1;
+	/* JVMs whose version is >= 9 need an extra VM argument (--add-modules) to start eclipse but earlier versions
+	 * do not recognize this argument, remove it from the list of VM arguments when the JVM version is below 9 */
 
-		/* first check to see if it is already specified */
-		while ((*vmArgv)[++i] != NULL) {
-			/* we are also counting the number of args here */
-			if (!specified && _tcsncmp((*vmArgv)[i], XXPERMGEN, _tcslen(XXPERMGEN)) == 0) {
-				specified = 1;
+	int i = 0;
+
+#ifdef MACOSX
+	if (!skipJava9ParamRemoval && !isModularVM(javaVM, jniLib)) {
+#else
+	if (!isModularVM(javaVM, jniLib)) {
+#endif
+		while ((*vmArgv)[i] != NULL) {
+			if (_tcsncmp((*vmArgv)[i], ADDMODULES, _tcslen(ADDMODULES)) == 0) {
+				int j = 0, k = 0;
+
+				if ((_tcschr((*vmArgv)[i], '=') != NULL) && ((*vmArgv)[i][13] == '=')) {
+					/* --add-modules=<value> */
+					j = i + 1;
+				} else if (_tcslen(ADDMODULES) == _tcslen((*vmArgv)[i])) {
+					/* --add-modules <value> OR --add-modules <end-of-vmArgv> */
+					((*vmArgv)[i + 1] != NULL) ? (j = i + 2) : (j = i + 1);
+				} else {
+					/* Probable new argument e.g. --add-modules-if-required or misspelled argument e.g. --add-modulesq */
+					i++;
+					continue;
+				}
+
+				/* shift all remaining arguments, but keep i, so that we can find repeated occurrences of --add-modules */
+				k = i;
+				(*vmArgv)[k] = (*vmArgv)[j];
+				while ((*vmArgv)[j] != NULL) {
+					(*vmArgv)[++k] = (*vmArgv)[++j];
+				}
+			} else {
+				i++;
 			}
-		}
-
-		if (!specified && isMaxPermSizeVM(javaVM, jniLib)) {
-			_TCHAR ** oldArgs = *vmArgv;
-			_TCHAR *newArg = malloc((_tcslen(XXPERMGEN) + _tcslen(permGen) + 1) * sizeof(_TCHAR));
-			_stprintf(newArg, _T_ECLIPSE("%s%s"), XXPERMGEN, permGen);
-
-			*vmArgv = malloc((i + 2) * sizeof(_TCHAR *));
-			memcpy(*vmArgv, oldArgs, i * sizeof(_TCHAR *));
-			(*vmArgv)[i] = newArg;
-			(*vmArgv)[i + 1] = 0;
 		}
 	}
 }
@@ -1372,7 +1395,7 @@ static _TCHAR* findSplash(_TCHAR* splashArg) {
 			/*directory, look for splash.bmp*/
 			ch = malloc( (length + 12) * sizeof(_TCHAR));
 			_stprintf( ch, _T_ECLIPSE("%s%c%s"), splashArg, dirSeparator, _T_ECLIPSE("splash.bmp") );
-			if (_tstat(ch, &stats) == 0 && stats.st_mode & S_IFREG) {
+			if (_tstat(ch, &stats) == 0 && (stats.st_mode & S_IFREG)) {
 				free(splashArg);
 				return ch;
 			}
@@ -1676,6 +1699,9 @@ static int determineVM(_TCHAR** msg) {
     		return vmEEProps(vmName, msg);
 
     	case VM_LIBRARY:
+#ifdef MACOSX
+    		skipJava9ParamRemoval = 1;
+#endif
     		ch = findCommand(vmName);
     		if(ch != NULL) {
     			jniLib = findVMLibrary(ch);
@@ -1828,7 +1854,7 @@ static int processEEProps(_TCHAR* eeFile)
         	else {
         		c1 = malloc( (_tcslen(argv[index]) - _tcslen(option->name) + 1) *sizeof(_TCHAR));
             	_tcscpy(c1, argv[index] + _tcslen(option->name));
-        		if (option->flag & ADJUST_PATH && option->flag & VALUE_IS_LIST) {
+        		if ((option->flag & ADJUST_PATH) && (option->flag & VALUE_IS_LIST)) {
         			c2 = checkPathList(c1, eeDir, 1);
        				free(c1);
     				c1 = c2;

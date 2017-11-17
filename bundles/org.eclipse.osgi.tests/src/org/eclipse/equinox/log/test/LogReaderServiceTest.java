@@ -10,12 +10,17 @@ package org.eclipse.equinox.log.test;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.*;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleContainerAdaptor.ContainerEvent;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
 import org.eclipse.osgi.launch.Equinox;
 import org.eclipse.osgi.tests.OSGiTestsActivator;
 import org.eclipse.osgi.tests.bundles.AbstractBundleTests;
 import org.osgi.framework.*;
 import org.osgi.service.log.*;
+import org.osgi.service.log.admin.LoggerAdmin;
+import org.osgi.service.log.admin.LoggerContext;
 
 public class LogReaderServiceTest extends AbstractBundleTests {
 
@@ -23,6 +28,10 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 	private ServiceReference logReference;
 	private LogReaderService reader;
 	private ServiceReference readerReference;
+	private ServiceReference<LoggerAdmin> loggerAdminReference;
+	private LoggerAdmin loggerAdmin;
+	LoggerContext rootLoggerContext;
+	Map<String, LogLevel> rootLogLevels;
 
 	public LogReaderServiceTest(String name) {
 		setName(name);
@@ -32,12 +41,23 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 		super.setUp();
 		logReference = OSGiTestsActivator.getContext().getServiceReference(LogService.class.getName());
 		readerReference = OSGiTestsActivator.getContext().getServiceReference(LogReaderService.class.getName());
+		loggerAdminReference = OSGiTestsActivator.getContext().getServiceReference(LoggerAdmin.class);
 
 		log = (LogService) OSGiTestsActivator.getContext().getService(logReference);
 		reader = (LogReaderService) OSGiTestsActivator.getContext().getService(readerReference);
+		loggerAdmin = OSGiTestsActivator.getContext().getService(loggerAdminReference);
+
+		rootLoggerContext = loggerAdmin.getLoggerContext(null);
+		rootLogLevels = rootLoggerContext.getLogLevels();
+
+		Map<String, LogLevel> copyLogLevels = new HashMap<String, LogLevel>(rootLogLevels);
+		copyLogLevels.put(Logger.ROOT_LOGGER_NAME, LogLevel.TRACE);
+		rootLoggerContext.setLogLevels(copyLogLevels);
 	}
 
 	protected void tearDown() throws Exception {
+		rootLoggerContext.setLogLevels(rootLogLevels);
+		OSGiTestsActivator.getContext().ungetService(loggerAdminReference);
 		OSGiTestsActivator.getContext().ungetService(logReference);
 		OSGiTestsActivator.getContext().ungetService(readerReference);
 		super.tearDown();
@@ -106,7 +126,6 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 	}
 
 	public void testLogBundleEventInfo() throws Exception {
-
 		// this is just a bundle that is harmless to start/stop
 		Bundle testBundle = installer.installBundle("test.logging.a"); //$NON-NLS-1$
 		TestListener listener = new TestListener(testBundle);
@@ -151,6 +170,36 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 		assertTrue(listener.getEntryX().getLevel() == LogService.LOG_INFO);
 	}
 
+	public void testLogFrameworkEventType() throws Exception {
+		final List<LogEntry> events = new CopyOnWriteArrayList<LogEntry>();
+		final CountDownLatch countDown = new CountDownLatch(3);
+		final Bundle b = getContext().getBundle();
+		LogListener listener = new LogListener() {
+			@Override
+			public void logged(LogEntry entry) {
+				if (b.equals(entry.getBundle())) {
+					events.add(entry);
+					countDown.countDown();
+				}
+			}
+		};
+		reader.addLogListener(listener);
+
+		//publishing an event with ERROR
+		b.adapt(Module.class).getContainer().getAdaptor().publishContainerEvent(ContainerEvent.ERROR, b.adapt(Module.class), new Exception());
+		//publishing an event with WARNING
+		b.adapt(Module.class).getContainer().getAdaptor().publishContainerEvent(ContainerEvent.WARNING, b.adapt(Module.class), new Exception());
+		//publishing an event with INFO
+		b.adapt(Module.class).getContainer().getAdaptor().publishContainerEvent(ContainerEvent.INFO, b.adapt(Module.class), new Exception());
+
+		countDown.await(2, TimeUnit.SECONDS);
+		assertEquals("Wrong number of events", 3, events.size());
+		assertEquals("Wrong type.", LogLevel.ERROR, events.get(0).getLogLevel());
+		assertEquals("Wrong type.", LogLevel.WARN, events.get(1).getLogLevel());
+		assertEquals("Wrong type.", LogLevel.INFO, events.get(2).getLogLevel());
+
+	}
+
 	public void testLogHistory1() throws BundleException {
 		File config = OSGiTestsActivator.getContext().getDataFile(getName());
 		Map<String, Object> configuration = new HashMap<String, Object>();
@@ -167,15 +216,15 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 			for (int i = 0; i < 9; i++) {
 				testLog.log(LogService.LOG_WARNING, String.valueOf(i));
 			}
-			assertEquals("Wrong number of logs.", 9, countLogEntries(testReader.getLog(), 0));
+			assertEquals("Wrong number of logs.", 9, countLogEntries(testReader.getLog(), 8));
 
 			// log 9 more things
 			for (int i = 9; i < 18; i++) {
 				testLog.log(LogService.LOG_WARNING, String.valueOf(i));
 			}
 
-			// should only be the last 10 logs (8 - 17)
-			assertEquals("Wrong number of logs.", 10, countLogEntries(testReader.getLog(), 8));
+			// should only be the last 10 logs (17-8)
+			assertEquals("Wrong number of logs.", 10, countLogEntries(testReader.getLog(), 17));
 		} finally {
 			try {
 				equinox.stop();
@@ -215,7 +264,7 @@ public class LogReaderServiceTest extends AbstractBundleTests {
 		while (logEntries.hasMoreElements()) {
 			LogEntry entry = (LogEntry) logEntries.nextElement();
 			assertEquals("Wrong log message.", String.valueOf(startingMessage), entry.getMessage());
-			startingMessage++;
+			startingMessage--;
 			count++;
 		}
 		return count;

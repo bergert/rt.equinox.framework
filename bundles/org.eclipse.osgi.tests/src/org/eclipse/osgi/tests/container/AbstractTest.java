@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2013, 2016 IBM Corporation and others.
+ * Copyright (c) 2013, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -12,14 +12,27 @@ package org.eclipse.osgi.tests.container;
 
 import java.io.IOException;
 import java.net.URL;
-import java.util.*;
-import org.eclipse.osgi.container.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleContainer;
+import org.eclipse.osgi.container.ModuleRevisionBuilder;
 import org.eclipse.osgi.container.builders.OSGiManifestBuilderFactory;
 import org.eclipse.osgi.service.debug.DebugOptions;
-import org.eclipse.osgi.tests.container.dummys.*;
+import org.eclipse.osgi.tests.container.dummys.DummyCollisionHook;
+import org.eclipse.osgi.tests.container.dummys.DummyContainerAdaptor;
+import org.eclipse.osgi.tests.container.dummys.DummyResolverHookFactory;
 import org.eclipse.osgi.util.ManifestElement;
-import org.junit.*;
-import org.osgi.framework.*;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.BundleException;
+import org.osgi.framework.BundleReference;
+import org.osgi.framework.ServiceRegistration;
 import org.osgi.framework.hooks.resolver.ResolverHook;
 
 public abstract class AbstractTest {
@@ -87,7 +100,14 @@ public abstract class AbstractTest {
 	}
 
 	protected Module installDummyModule(Map<String, String> manifest, String location, ModuleContainer container) throws BundleException {
+		return installDummyModule(manifest, -1, location, container);
+	}
+
+	protected Module installDummyModule(Map<String, String> manifest, long id, String location, ModuleContainer container) throws BundleException {
 		ModuleRevisionBuilder builder = OSGiManifestBuilderFactory.createBuilder(manifest);
+		if (id > 0) {
+			builder.setId(id);
+		}
 		Module system = container.getModule(0);
 		return container.install(system, location, builder, null);
 	}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2008, 2016 IBM Corporation and others.
+ * Copyright (c) 2008, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -15,29 +15,35 @@ import java.net.*;
 import java.security.Permission;
 import java.security.PrivilegedAction;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.*;
 import javax.net.SocketFactory;
 import junit.framework.Test;
 import junit.framework.TestSuite;
 import org.eclipse.core.runtime.adaptor.EclipseStarter;
+import org.eclipse.osgi.framework.util.FilePath;
 import org.eclipse.osgi.internal.framework.EquinoxConfiguration;
 import org.eclipse.osgi.internal.location.EquinoxLocations;
 import org.eclipse.osgi.launch.Equinox;
 import org.eclipse.osgi.service.datalocation.Location;
 import org.eclipse.osgi.service.environment.EnvironmentInfo;
+import org.eclipse.osgi.storage.url.reference.Handler;
 import org.eclipse.osgi.tests.OSGiTestsActivator;
+import org.eclipse.osgi.tests.security.BaseSecurityTest;
 import org.junit.Assert;
 import org.osgi.framework.*;
 import org.osgi.framework.hooks.resolver.ResolverHook;
 import org.osgi.framework.hooks.resolver.ResolverHookFactory;
 import org.osgi.framework.hooks.weaving.WeavingHook;
 import org.osgi.framework.hooks.weaving.WovenClass;
+import org.osgi.framework.launch.Framework;
+import org.osgi.framework.launch.FrameworkFactory;
 import org.osgi.framework.namespace.NativeNamespace;
 import org.osgi.framework.wiring.*;
 import org.osgi.resource.Capability;
 import org.osgi.resource.Requirement;
+import org.osgi.service.log.*;
 import org.osgi.service.packageadmin.ExportedPackage;
 import org.osgi.service.packageadmin.PackageAdmin;
 import org.osgi.service.startlevel.StartLevel;
@@ -1246,6 +1252,11 @@ public class SystemBundleTests extends AbstractBundleTests {
 			throw new IOException();
 		}
 
+		@Override
+		public URLConnection openConnection(URL u, Proxy p) throws IOException {
+			throw new IOException();
+		}
+
 	}
 
 	public void testURLMultiplexing01() throws BundleException {
@@ -1561,11 +1572,7 @@ public class SystemBundleTests extends AbstractBundleTests {
 			}
 			assertEquals("Wrong state for SystemBundle", Bundle.RESOLVED, equinox.getState()); //$NON-NLS-1$
 		} finally {
-			try {
-				testBundleInstaller.shutdown();
-			} catch (BundleException e) {
-				fail("Could not shutdown installer", e);
-			}
+			testBundleInstaller.shutdown();
 		}
 	}
 
@@ -2416,6 +2423,19 @@ public class SystemBundleTests extends AbstractBundleTests {
 		new Equinox(null);
 	}
 
+	public void testNullStorageArea() throws BundleException {
+		File install = getContext().getDataFile(getName());
+		install.mkdirs();
+		Equinox equinox = new Equinox(Collections.singletonMap("osgi.install.area", install.getAbsolutePath()));
+		try {
+			equinox.init();
+			String storageArea = equinox.getBundleContext().getProperty(Constants.FRAMEWORK_STORAGE);
+			assertNotNull("No storage area set.", storageArea);
+		} finally {
+			equinox.stop();
+		}
+	}
+
 	public void testOSGiDevSetsCheckConfiguration() throws BundleException {
 		String originalCheckConfiguration = System.clearProperty(EquinoxConfiguration.PROP_CHECK_CONFIGURATION);
 		try {
@@ -2594,7 +2614,7 @@ public class SystemBundleTests extends AbstractBundleTests {
 		config.mkdirs();
 		Map<String, Object> configuration = new HashMap<String, Object>();
 		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
-		configuration.put(Constants.FRAMEWORK_SYSTEMCAPABILITIES, "osgi.ee; osgi.ee=JavaSE; version:Version=1.6, something.system");
+		configuration.put(Constants.FRAMEWORK_SYSTEMCAPABILITIES, "osgi.ee; osgi.ee=JavaSE; version:Version=1.7, something.system");
 		configuration.put(Constants.FRAMEWORK_SYSTEMPACKAGES, "something.system");
 		configuration.put(Constants.FRAMEWORK_SYSTEMCAPABILITIES_EXTRA, "something.extra");
 		configuration.put(Constants.FRAMEWORK_SYSTEMPACKAGES_EXTRA, "something.extra");
@@ -2662,22 +2682,45 @@ public class SystemBundleTests extends AbstractBundleTests {
 		assertNotNull("No system bundle class loader.", cl);
 	}
 
-	public void testJavaProfile() {
-		String original = System.getProperty("java.specification.version");
+	public void testJavaProfile() throws IOException {
+		String originalSpecVersion = System.getProperty("java.specification.version");
+		String originalJavaHome = System.getProperty("java.home");
 		try {
-			doTestJavaProfile("9.3.1", "JavaSE-9");
-			doTestJavaProfile("9", "JavaSE-9");
-			doTestJavaProfile("8.4", "JavaSE-1.8");
-			doTestJavaProfile("1.10.1", "JavaSE-1.8");
-			doTestJavaProfile("1.9", "JavaSE-1.8");
-			doTestJavaProfile("1.8", "JavaSE-1.8");
-			doTestJavaProfile("1.7", "JavaSE-1.7");
+			doTestJavaProfile("9.3.1", "JavaSE-9", null);
+			doTestJavaProfile("9", "JavaSE-9", null);
+			doTestJavaProfile("8.4", "JavaSE-1.8", null);
+			doTestJavaProfile("1.10.1", "JavaSE-1.8", null);
+			doTestJavaProfile("1.9", "JavaSE-1.8", null);
+			doTestJavaProfile("1.8", "JavaSE-1.8", null);
+			doTestJavaProfile("1.7", "JavaSE-1.7", null);
+			doTestJavaProfile("1.8", "JavaSE/compact3-1.8", "compact3");
+			doTestJavaProfile("1.8", "JavaSE/compact3-1.8", "\"compact3\"");
+			doTestJavaProfile("1.8", "JavaSE/compact3-1.8", " \"compact3\" ");
+			doTestJavaProfile("1.8", "JavaSE/compact3-1.8", " compact3 ");
+			doTestJavaProfile("1.8", "JavaSE-1.8", "\"compact4\"");
+			doTestJavaProfile("9", "JavaSE/compact3-1.8", "compact3");
+			doTestJavaProfile("9", "JavaSE/compact3-1.8", "\"compact3\"");
+			doTestJavaProfile("9", "JavaSE-9", "\"compact4\"");
 		} finally {
-			System.setProperty("java.specification.version", original);
+			System.setProperty("java.specification.version", originalSpecVersion);
+			System.setProperty("java.home", originalJavaHome);
 		}
 	}
 
-	private void doTestJavaProfile(String javaSpecVersion, String expectedEEName) {
+	private void doTestJavaProfile(String javaSpecVersion, String expectedEEName, String releaseName) throws FileNotFoundException, IOException {
+		if (releaseName != null) {
+			File release = getContext().getDataFile("jre/release");
+			release.getParentFile().mkdirs();
+			Properties props = new Properties();
+			props.put("JAVA_PROFILE", releaseName);
+			FileOutputStream propStream = new FileOutputStream(release);
+			try {
+				props.store(propStream, null);
+			} finally {
+				propStream.close();
+			}
+			System.setProperty("java.home", release.getParentFile().getAbsolutePath());
+		}
 		System.setProperty("java.specification.version", javaSpecVersion);
 		// create/stop/ test
 		File config = OSGiTestsActivator.getContext().getDataFile(getName() + javaSpecVersion);
@@ -2704,7 +2747,7 @@ public class SystemBundleTests extends AbstractBundleTests {
 		}
 		assertEquals("Wrong state for SystemBundle", Bundle.RESOLVED, equinox.getState()); //$NON-NLS-1$
 
-		assertTrue("Wrong osgi EE: " + osgiEE, osgiEE.endsWith(expectedEEName));
+		assertTrue("Wrong osgi EE: expected: " + expectedEEName + " but was: " + osgiEE, osgiEE.endsWith(expectedEEName));
 	}
 
 	private static File[] createBundles(File outputDir, int bundleCount) throws IOException {
@@ -2718,7 +2761,7 @@ public class SystemBundleTests extends AbstractBundleTests {
 		return bundles;
 	}
 
-	private static File createBundle(File outputDir, String id, boolean emptyManifest, boolean dirBundle) throws IOException {
+	public static File createBundle(File outputDir, String id, boolean emptyManifest, boolean dirBundle) throws IOException {
 		File file = new File(outputDir, "bundle" + id + (dirBundle ? "" : ".jar")); //$NON-NLS-1$ //$NON-NLS-2$
 		if (!dirBundle) {
 			JarOutputStream jos = new JarOutputStream(new FileOutputStream(file), createManifest(id, emptyManifest));
@@ -2745,7 +2788,7 @@ public class SystemBundleTests extends AbstractBundleTests {
 		return manifest;
 	}
 
-	private static File createBundle(File outputDir, String bundleName, Map<String, String> headers) throws IOException {
+	static File createBundle(File outputDir, String bundleName, Map<String, String> headers, Map<String, String>... entries) throws IOException {
 		Manifest m = new Manifest();
 		Attributes attributes = m.getMainAttributes();
 		attributes.putValue("Manifest-Version", "1.0");
@@ -2754,6 +2797,15 @@ public class SystemBundleTests extends AbstractBundleTests {
 		}
 		File file = new File(outputDir, "bundle" + bundleName + ".jar"); //$NON-NLS-1$ //$NON-NLS-2$
 		JarOutputStream jos = new JarOutputStream(new FileOutputStream(file), m);
+		if (entries != null) {
+			for (Map<String, String> entryMap : entries) {
+				for (Map.Entry<String, String> entry : entryMap.entrySet()) {
+					jos.putNextEntry(new JarEntry(entry.getKey()));
+					jos.write(entry.getValue().getBytes());
+					jos.closeEntry();
+				}
+			}
+		}
 		jos.flush();
 		jos.close();
 		return file;
@@ -2817,4 +2869,398 @@ public class SystemBundleTests extends AbstractBundleTests {
 			equinox.waitForStop(5000);
 		}
 	}
+
+	public void testInitialBundleUpdate() throws IOException {
+		// test installing bundle with empty manifest
+		File config = OSGiTestsActivator.getContext().getDataFile(getName());
+		Map<String, Object> configuration = new HashMap<String, Object>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+
+		Equinox equinox = new Equinox(configuration);
+		try {
+			equinox.init();
+		} catch (BundleException e) {
+			fail("Unexpected exception in init()", e); //$NON-NLS-1$
+		}
+		// should be in the STARTING state
+		assertEquals("Wrong state for SystemBundle", Bundle.STARTING, equinox.getState()); //$NON-NLS-1$
+		BundleContext systemContext = equinox.getBundleContext();
+		assertNotNull("System context is null", systemContext); //$NON-NLS-1$
+		try {
+			equinox.start();
+		} catch (BundleException e) {
+			fail("Failed to start the framework", e); //$NON-NLS-1$
+		}
+		assertEquals("Wrong state for SystemBundle", Bundle.ACTIVE, equinox.getState()); //$NON-NLS-1$
+
+		File bundleFile = null;
+		try {
+			File baseDir = new File(config, "bundles");
+			baseDir.mkdirs();
+			bundleFile = createBundle(baseDir, getName(), true, true);
+		} catch (IOException e) {
+			fail("Unexpected error creating bundles.", e);
+		}
+		Bundle testBundle = null;
+		try {
+			String location = "reference:file:///" + bundleFile.getAbsolutePath();
+			URL url = new URL(null, location, new Handler(systemContext.getProperty(EquinoxLocations.PROP_INSTALL_AREA)));
+			testBundle = systemContext.installBundle("initial@" + location, url.openStream()); //$NON-NLS-1$
+		} catch (BundleException e) {
+			fail("Unexpected install error", e); //$NON-NLS-1$
+		}
+
+		try {
+			testBundle.update();
+		} catch (BundleException e) {
+			fail("Unexpected update error", e); //$NON-NLS-1$
+		}
+
+		try {
+			equinox.stop();
+		} catch (BundleException e) {
+			fail("Unexpected erorr stopping framework", e); //$NON-NLS-1$
+		}
+		try {
+			equinox.waitForStop(10000);
+		} catch (InterruptedException e) {
+			fail("Unexpected interrupted exception", e); //$NON-NLS-1$
+		}
+		assertEquals("Wrong state for SystemBundle", Bundle.RESOLVED, equinox.getState()); //$NON-NLS-1$
+	}
+
+	public void testDaemonActiveThread() throws BundleException, InterruptedException {
+		File config = OSGiTestsActivator.getContext().getDataFile(getName());
+		config.mkdirs();
+		Map<String, Object> configuration = new HashMap<String, Object>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+
+		// test setting to anything other than 'normal'
+		// should result in a daemon thread
+		configuration.put(EquinoxConfiguration.PROP_ACTIVE_THREAD_TYPE, "daemon");
+		Equinox equinox = new Equinox(configuration);
+		equinox.start();
+		checkActiveThreadType(equinox, true);
+		equinox.stop();
+		equinox.waitForStop(10000);
+
+		// test setting to 'normal'
+		// should result in a non-daemon thread
+		configuration.put(EquinoxConfiguration.PROP_ACTIVE_THREAD_TYPE, EquinoxConfiguration.ACTIVE_THREAD_TYPE_NORMAL);
+		equinox = new Equinox(configuration);
+		equinox.start();
+		checkActiveThreadType(equinox, false);
+		equinox.stop();
+		equinox.waitForStop(10000);
+
+		// test setting to null (default)
+		// should result in a non-daemon thread
+		configuration.remove(EquinoxConfiguration.PROP_ACTIVE_THREAD_TYPE);
+		equinox = new Equinox(configuration);
+		equinox.start();
+		checkActiveThreadType(equinox, false);
+		equinox.stop();
+	}
+
+	public void testLazyTriggerOnLoadError() throws InterruptedException, BundleException {
+		// create/start/stop/start/stop test
+		File config = OSGiTestsActivator.getContext().getDataFile(getName()); //$NON-NLS-1$
+		Map<String, Object> configuration = new HashMap<String, Object>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+		configuration.put(EquinoxConfiguration.PROP_COMPATIBILITY_START_LAZY_ON_FAIL_CLASSLOAD, "true");
+		Equinox equinox = new Equinox(configuration);
+
+		equinox.start();
+
+		BundleContext systemContext = equinox.getBundleContext();
+		assertNotNull("System context is null", systemContext); //$NON-NLS-1$
+		// install a lazy activated bundle
+		Bundle b = systemContext.installBundle(installer.getBundleLocation("chain.test.d")); //$NON-NLS-1$
+		b.start(Bundle.START_ACTIVATION_POLICY);
+		assertEquals("Wrong state of bundle.", Bundle.STARTING, b.getState());
+		try {
+			// trigger the start by loading non existing class
+			b.loadClass("does.not.exist.Clazz");
+			fail("Expected class load error");
+		} catch (ClassNotFoundException e) {
+			// expected
+		}
+		// should be active now
+		assertEquals("Wrong state of bundle.", Bundle.ACTIVE, b.getState());
+		// put the framework back to the RESOLVED state
+		equinox.stop();
+		equinox.waitForStop(10000);
+
+		// revert back to default behavior
+		configuration.remove(EquinoxConfiguration.PROP_COMPATIBILITY_START_LAZY_ON_FAIL_CLASSLOAD);
+		equinox = new Equinox(configuration);
+		equinox.start();
+		b = equinox.getBundleContext().getBundle(b.getBundleId());
+		assertEquals("Wrong state of bundle.", Bundle.STARTING, b.getState());
+
+		try {
+			// loading non-existing class should NOT trigger lazy activation now
+			b.loadClass("does.not.exist.Clazz");
+			fail("Expected class load error");
+		} catch (ClassNotFoundException e) {
+			// expected
+		}
+		// should still be in STARTING state.
+		assertEquals("Wrong state of bundle.", Bundle.STARTING, b.getState());
+
+		equinox.stop();
+	}
+
+	public void testConfigPercentChar() throws BundleException, IOException {
+		doTestConfigSpecialChar('%');
+	}
+
+	public void testConfigSpaceChar() throws BundleException, IOException {
+		doTestConfigSpecialChar(' ');
+	}
+
+	public void testConfigPlusChar() throws BundleException, IOException {
+		doTestConfigSpecialChar('+');
+	}
+
+	private void doTestConfigSpecialChar(char c) throws BundleException, IOException {
+		File config = OSGiTestsActivator.getContext().getDataFile(getName() + c + "config");
+		config.mkdirs();
+		// create a config.ini with some system property substitutes
+		Properties configIni = new Properties();
+		configIni.setProperty("test.config", getName());
+		configIni.store(new FileOutputStream(new File(config, "config.ini")), "Test config.ini");
+
+		Map<String, Object> configuration = new HashMap<String, Object>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+		Equinox equinox = new Equinox(configuration);
+		equinox.init();
+
+		BundleContext systemContext = equinox.getBundleContext();
+		// check for substitution
+		assertEquals("Wrong value for test.config", getName(), systemContext.getProperty("test.config"));
+
+		equinox.stop();
+		try {
+			equinox.waitForStop(5000);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			fail("Unexpected interruption.", e);
+		}
+
+	}
+
+	void checkActiveThreadType(Equinox equinox, boolean expectIsDeamon) {
+		String uuid = equinox.getBundleContext().getProperty(Constants.FRAMEWORK_UUID);
+		ThreadGroup topGroup = Thread.currentThread().getThreadGroup();
+		if (topGroup != null) {
+			while (topGroup.getParent() != null) {
+				topGroup = topGroup.getParent();
+			}
+		}
+		Thread[] threads = new Thread[topGroup.activeCount()];
+		topGroup.enumerate(threads);
+		Thread found = null;
+		for (Thread t : threads) {
+			String name = t.getName();
+			if (("Active Thread: Equinox Container: " + uuid).equals(name)) {
+				found = t;
+				break;
+			}
+		}
+		assertNotNull("No framework active thread for \"" + uuid + "\" found in : " + Arrays.toString(threads), found);
+		assertEquals("Wrong daemon type.", expectIsDeamon, found.isDaemon());
+	}
+
+	public void testWindowsAlias() {
+		String origOS = System.getProperty("os.name");
+		File config = OSGiTestsActivator.getContext().getDataFile(getName()); //$NON-NLS-1$
+		Map configuration = new HashMap();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+		System.setProperty("os.name", "Windows 5000");
+		Equinox equinox = null;
+		try {
+			equinox = new Equinox(configuration);
+			equinox.init();
+			Assert.assertEquals("Wrong framework os name value", "win32", equinox.getBundleContext().getProperty(Constants.FRAMEWORK_OS_NAME));
+		} catch (BundleException e) {
+			fail("Failed init", e);
+		} finally {
+			System.setProperty("os.name", origOS);
+			try {
+				if (equinox != null) {
+					equinox.stop();
+					equinox.waitForStop(1000);
+				}
+			} catch (BundleException e) {
+				fail("Failed to stop framework.", e);
+			} catch (InterruptedException e) {
+				fail("Failed to stop framework.", e);
+			}
+		}
+	}
+
+	public void testOverrideEquinoxConfigAreaProp() {
+		File config = OSGiTestsActivator.getContext().getDataFile(getName()); //$NON-NLS-1$
+		Map configuration = new HashMap();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+		configuration.put(EquinoxLocations.PROP_CONFIG_AREA, config.getAbsolutePath() + "-override");
+		configuration.put(EquinoxConfiguration.PROP_LOG_HISTORY_MAX, "10");
+		Equinox equinox = null;
+		try {
+			equinox = new Equinox(configuration);
+			equinox.init();
+			BundleContext bc = equinox.getBundleContext();
+			LogReaderService logReader = bc.getService(bc.getServiceReference(LogReaderService.class));
+			Enumeration<LogEntry> logs = logReader.getLog();
+			assertTrue("No logs found.", logs.hasMoreElements());
+			LogEntry entry = logs.nextElement();
+			assertEquals("Wrong log level.", LogLevel.WARN, entry.getLogLevel());
+			assertTrue("Wrong message found: " + entry.getMessage(), entry.getMessage().contains(EquinoxLocations.PROP_CONFIG_AREA));
+		} catch (BundleException e) {
+			fail("Failed init", e);
+		} finally {
+			try {
+				if (equinox != null) {
+					equinox.stop();
+					equinox.waitForStop(1000);
+				}
+			} catch (BundleException e) {
+				fail("Failed to stop framework.", e);
+			} catch (InterruptedException e) {
+				fail("Failed to stop framework.", e);
+			}
+		}
+	}
+
+	public void testSystemCapabilitiesBug522125() throws URISyntaxException, FileNotFoundException, IOException, BundleException, InterruptedException {
+		String frameworkLocation = OSGiTestsActivator.getContext().getProperty(EquinoxConfiguration.PROP_FRAMEWORK);
+		URI uri = new URI(frameworkLocation);
+		File f = new File(uri);
+		if (!f.isFile()) {
+			Assert.fail("Cannot test when framework location is a directory: " + f.getAbsolutePath());
+		}
+		File testDestination = OSGiTestsActivator.getContext().getDataFile(getName() + ".framework.jar");
+		BaseSecurityTest.copy(new FileInputStream(f), testDestination);
+		FilePath userDir = new FilePath(System.getProperty("user.dir"));
+		FilePath testPath = new FilePath(testDestination);
+		String relative = userDir.makeRelative(testPath);
+		System.out.println(relative);
+		URL relativeURL = new URL("file:" + relative);
+		relativeURL.openStream().close();
+		final ClassLoader osgiClassLoader = getClass().getClassLoader();
+		URLClassLoader cl = new URLClassLoader(new URL[] {relativeURL}) {
+
+			@Override
+			protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+				if (name.startsWith("org.osgi.")) {
+					return osgiClassLoader.loadClass(name);
+				}
+				return super.loadClass(name, resolve);
+			}
+
+		};
+
+		ServiceLoader<FrameworkFactory> sLoader = ServiceLoader.load(FrameworkFactory.class, cl);
+		FrameworkFactory factory = sLoader.iterator().next();
+
+		File config = OSGiTestsActivator.getContext().getDataFile(getName()); //$NON-NLS-1$
+		Map<String, String> configuration = new HashMap<String, String>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+		configuration.put(EquinoxConfiguration.PROP_FRAMEWORK, relativeURL.toExternalForm());
+
+		Framework framework = factory.newFramework(configuration);
+		framework.init();
+		framework.stop();
+		framework.waitForStop(5000);
+
+		BundleRevision systemRevision1 = framework.adapt(BundleRevision.class);
+		int capCount1 = systemRevision1.getCapabilities(null).size();
+
+		framework = factory.newFramework(configuration);
+		framework.init();
+		framework.stop();
+		framework.waitForStop(5000);
+
+		BundleRevision systemRevision2 = framework.adapt(BundleRevision.class);
+		int capCount2 = systemRevision2.getCapabilities(null).size();
+
+		Assert.assertEquals("Wrong number of capabilities", capCount1, capCount2);
+	}
+
+	// Disabled because the test is too much for the build machines
+	public void disable_testBundleIDLock() {
+		File config = OSGiTestsActivator.getContext().getDataFile(getName()); //$NON-NLS-1$
+		Map<String, Object> configuration = new HashMap<String, Object>();
+		configuration.put(Constants.FRAMEWORK_STORAGE, config.getAbsolutePath());
+
+		final Equinox equinox = new Equinox(configuration);
+		try {
+			equinox.init();
+		} catch (BundleException e) {
+			fail("Unexpected exception in init()", e); //$NON-NLS-1$
+		}
+		// should be in the STARTING state
+		assertEquals("Wrong state for SystemBundle", Bundle.STARTING, equinox.getState()); //$NON-NLS-1$
+		final BundleContext systemContext = equinox.getBundleContext();
+		assertNotNull("System context is null", systemContext); //$NON-NLS-1$
+		try {
+			equinox.start();
+		} catch (BundleException e) {
+			fail("Failed to start the framework", e); //$NON-NLS-1$
+		}
+		assertEquals("Wrong state for SystemBundle", Bundle.ACTIVE, equinox.getState()); //$NON-NLS-1$
+
+		final int numBundles = 40000;
+		final File[] testBundles;
+		try {
+			testBundles = createBundles(new File(config, "bundles"), numBundles); //$NON-NLS-1$
+		} catch (IOException e) {
+			fail("Unexpected error creating budnles", e); //$NON-NLS-1$
+			throw new RuntimeException();
+		}
+
+		ExecutorService executor = Executors.newFixedThreadPool(500);
+		final List<Throwable> errors = new CopyOnWriteArrayList<Throwable>();
+		try {
+			for (int i = 0; i < testBundles.length; i++) {
+				final File testBundleFile = testBundles[i];
+				executor.execute(new Runnable() {
+
+					@Override
+					public void run() {
+						try {
+							systemContext.installBundle("file:///" + testBundleFile.getAbsolutePath());
+						} catch (BundleException e) {
+							e.printStackTrace();
+							errors.add(e);
+						}
+					}
+				});
+
+			}
+		} finally {
+			executor.shutdown();
+			try {
+				executor.awaitTermination(600, TimeUnit.SECONDS);
+			} catch (InterruptedException e) {
+				fail("Interrupted.", e);
+			}
+		}
+
+		Assert.assertEquals("Errors found.", Collections.emptyList(), errors);
+		Assert.assertEquals("Wrong number of bundles.", numBundles + 1, systemContext.getBundles().length);
+		try {
+			equinox.stop();
+		} catch (BundleException e) {
+			fail("Unexpected erorr stopping framework", e); //$NON-NLS-1$
+		}
+		try {
+			equinox.waitForStop(10000);
+		} catch (InterruptedException e) {
+			fail("Unexpected interrupted exception", e); //$NON-NLS-1$
+		}
+		assertEquals("Wrong state for SystemBundle", Bundle.RESOLVED, equinox.getState()); //$NON-NLS-1$
+	}
+
 }

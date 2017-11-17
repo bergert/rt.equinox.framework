@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2014 IBM Corporation and others.
+ * Copyright (c) 2003, 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -13,17 +13,42 @@ package org.eclipse.osgi.internal.framework.legacy;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.util.*;
-import org.eclipse.osgi.container.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.eclipse.osgi.container.Module;
+import org.eclipse.osgi.container.ModuleCapability;
+import org.eclipse.osgi.container.ModuleContainer;
+import org.eclipse.osgi.container.ModuleRevision;
+import org.eclipse.osgi.container.ModuleWire;
+import org.eclipse.osgi.container.ModuleWiring;
 import org.eclipse.osgi.internal.container.Capabilities;
 import org.eclipse.osgi.internal.container.InternalUtils;
 import org.eclipse.osgi.internal.framework.EquinoxContainer;
-import org.osgi.framework.*;
-import org.osgi.framework.namespace.*;
-import org.osgi.framework.wiring.*;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleReference;
+import org.osgi.framework.Constants;
+import org.osgi.framework.Version;
+import org.osgi.framework.VersionRange;
+import org.osgi.framework.namespace.BundleNamespace;
+import org.osgi.framework.namespace.HostNamespace;
+import org.osgi.framework.namespace.IdentityNamespace;
+import org.osgi.framework.namespace.PackageNamespace;
+import org.osgi.framework.wiring.BundleCapability;
+import org.osgi.framework.wiring.BundleRevision;
+import org.osgi.framework.wiring.BundleWire;
+import org.osgi.framework.wiring.BundleWiring;
 import org.osgi.resource.Namespace;
 import org.osgi.resource.Requirement;
-import org.osgi.service.packageadmin.*;
+import org.osgi.service.packageadmin.ExportedPackage;
+import org.osgi.service.packageadmin.PackageAdmin;
+import org.osgi.service.packageadmin.RequiredBundle;
 
 @Deprecated
 public class PackageAdminImpl implements PackageAdmin {
@@ -69,7 +94,7 @@ public class PackageAdminImpl implements PackageAdmin {
 		Module module = StartLevelImpl.getModule(bundle);
 		Collection<ModuleRevision> revisions = module == null ? Collections.<ModuleRevision> emptyList() : module.getRevisions().getModuleRevisions();
 
-		Collection<ExportedPackage> allExports = new ArrayList<ExportedPackage>();
+		Collection<ExportedPackage> allExports = new ArrayList<>();
 		for (ModuleRevision revision : revisions) {
 			ModuleWiring wiring = revision.getWiring();
 			if (wiring != null) {
@@ -111,7 +136,7 @@ public class PackageAdminImpl implements PackageAdmin {
 		Requirement packageReq = ModuleContainer.createRequirement(PackageNamespace.PACKAGE_NAMESPACE, directives, attributes);
 		Collection<BundleCapability> packageCaps = container.getFrameworkWiring().findProviders(packageReq);
 		InternalUtils.filterCapabilityPermissions(packageCaps);
-		List<ExportedPackage> result = new ArrayList<ExportedPackage>();
+		List<ExportedPackage> result = new ArrayList<>();
 		for (BundleCapability capability : packageCaps) {
 			ModuleWiring wiring = (ModuleWiring) capability.getRevision().getWiring();
 			if (wiring != null) {
@@ -120,7 +145,7 @@ public class PackageAdminImpl implements PackageAdmin {
 					// This is a fragment, just get all the host wirings
 					List<ModuleWire> hostWires = wiring.getRequiredModuleWires(HostNamespace.HOST_NAMESPACE);
 					if (hostWires != null && !hostWires.isEmpty()) {
-						wirings = new ArrayList<ModuleWiring>(hostWires.size());
+						wirings = new ArrayList<>(hostWires.size());
 						for (ModuleWire hostWire : hostWires) {
 							ModuleWiring hostWiring = hostWire.getProviderWiring();
 							if (hostWiring != null) {
@@ -157,7 +182,7 @@ public class PackageAdminImpl implements PackageAdmin {
 		Requirement bundleReq = ModuleContainer.createRequirement(BundleNamespace.BUNDLE_NAMESPACE, directives, attributes);
 		Collection<BundleCapability> bundleCaps = container.getFrameworkWiring().findProviders(bundleReq);
 		InternalUtils.filterCapabilityPermissions(bundleCaps);
-		Collection<RequiredBundle> result = new ArrayList<RequiredBundle>();
+		Collection<RequiredBundle> result = new ArrayList<>();
 		for (BundleCapability capability : bundleCaps) {
 			BundleWiring wiring = capability.getRevision().getWiring();
 			if (wiring != null) {
@@ -183,7 +208,7 @@ public class PackageAdminImpl implements PackageAdmin {
 		if (identityCaps.isEmpty()) {
 			return null;
 		}
-		List<Bundle> sorted = new ArrayList<Bundle>(identityCaps.size());
+		List<Bundle> sorted = new ArrayList<>(identityCaps.size());
 		for (BundleCapability capability : identityCaps) {
 			Bundle b = capability.getRevision().getBundle();
 			// a sanity check incase this is an old revision
@@ -215,7 +240,7 @@ public class PackageAdminImpl implements PackageAdmin {
 			// we don't hold locks while checking the graph, just return if no longer valid
 			return null;
 		}
-		Collection<Bundle> fragments = new ArrayList<Bundle>(hostWires.size());
+		Collection<Bundle> fragments = new ArrayList<>(hostWires.size());
 		for (ModuleWire wire : hostWires) {
 			Bundle fragment = wire.getRequirer().getBundle();
 			if (fragment != null) {
@@ -235,7 +260,7 @@ public class PackageAdminImpl implements PackageAdmin {
 			// we don't hold locks while checking the graph, just return if no longer valid
 			return null;
 		}
-		Collection<Bundle> hosts = new ArrayList<Bundle>(hostWires.size());
+		Collection<Bundle> hosts = new ArrayList<>(hostWires.size());
 		for (ModuleWire wire : hostWires) {
 			Bundle host = wire.getProvider().getBundle();
 			if (host != null) {
@@ -270,7 +295,7 @@ public class PackageAdminImpl implements PackageAdmin {
 		return null;
 	}
 
-	public Bundle getBundle(final Class clazz) {
+	public Bundle getBundle(final Class<?> clazz) {
 		if (System.getSecurityManager() == null)
 			return getBundlePriv(clazz);
 		return AccessController.doPrivileged(new GetBundleAction(this, clazz));
@@ -320,7 +345,7 @@ public class PackageAdminImpl implements PackageAdmin {
 			if (!providerWiring.isInUse()) {
 				return null;
 			}
-			Set<Bundle> importing = new HashSet<Bundle>();
+			Set<Bundle> importing = new HashSet<>();
 
 			String packageName = getName();
 			addRequirers(importing, providerWiring, packageName);
@@ -424,7 +449,7 @@ public class PackageAdminImpl implements PackageAdmin {
 			if (!providerWiring.isInUse()) {
 				return null;
 			}
-			Set<Bundle> requiring = new HashSet<Bundle>();
+			Set<Bundle> requiring = new HashSet<>();
 
 			addRequirers(requiring, providerWiring);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2007, 2015 IBM Corporation and others.
+ * Copyright (c) 2007, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at 
@@ -17,14 +17,14 @@
 
 struct GTK_PTRS gtk = { 1 }; /* initialize the first field "not_initialized" so we can tell when we've loaded the pointers */
 
-static _TCHAR* minVerMsg1 = _T_ECLIPSE("Starting from the Eclipse 4.5 (Mars) release, \nGTK+ versions below");
+static _TCHAR* minVerMsg1 = _T_ECLIPSE("Starting from the Eclipse 4.7 (Oxygen) release, \nGTK+ versions below");
 static _TCHAR* minVerMsg2 = _T_ECLIPSE("are not supported.\nGTK+ version found is");
 static _TCHAR* minVerTitle = _T_ECLIPSE("Unsupported GTK+ version");
 static _TCHAR* gtkInitFail = _T_ECLIPSE("Unable to initialize GTK+\n");
 static _TCHAR* upgradeWarning1 = _T_ECLIPSE("\nPlease upgrade GTK+ to minimum version");
 static _TCHAR* upgradeWarning2 = _T_ECLIPSE("\nor use an older version of Eclipse.\nClick OK to Exit.");
 static int minGtkMajorVersion = 2;
-static int minGtkMinorVersion = 18;
+static int minGtkMinorVersion = 24;
 static int minGtkMicroVersion = 0;
 
 /* tables to help initialize the function pointers */
@@ -33,10 +33,8 @@ static FN_TABLE gtkFunctions[] = {
 	FN_TABLE_ENTRY(gtk_container_add, 1),
 	FN_TABLE_ENTRY(gtk_dialog_run, 1),
 	FN_TABLE_ENTRY(gtk_image_new_from_pixbuf, 1),
-	FN_TABLE_ENTRY(gtk_init_check, 1),
-	FN_TABLE_ENTRY(gtk_init_with_args, 0),
+	FN_TABLE_ENTRY(gtk_init_with_args, 1),
 	FN_TABLE_ENTRY(gtk_message_dialog_new, 1),
-	FN_TABLE_ENTRY(gtk_set_locale, 0),
 	FN_TABLE_ENTRY(gtk_widget_destroy, 1),
 	FN_TABLE_ENTRY(gtk_widget_destroyed, 1),
 	FN_TABLE_ENTRY(gtk_widget_show_all, 1),
@@ -50,7 +48,6 @@ static FN_TABLE gtkFunctions[] = {
 };
 /* functions from libgdk-x11-2.0 or libgdk-3.so.0*/
 static FN_TABLE gdkFunctions[] = {
-	FN_TABLE_ENTRY(gdk_set_program_class, 1),
 	FN_TABLE_ENTRY(gdk_display_get_default, 1),
 	FN_TABLE_ENTRY(gdk_x11_display_get_xdisplay, 1),
 	FN_TABLE_ENTRY(gdk_screen_get_default, 1),
@@ -181,7 +178,6 @@ int loadGtk() {
 				if ( x11Lib == NULL || loadGtkSymbols(x11Lib, x11Functions)  != 0) return -1;
 
 				/* Initialize GTK. */
-				if (gtk.gtk_set_locale) gtk.gtk_set_locale();
 				if (gtk.gtk_init_with_args) {
 					GError *error = NULL;
 					if (!gtk.gtk_init_with_args(0, NULL, NULL, NULL, NULL, &error)) {

@@ -10,6 +10,7 @@
 #     IBM Corporation - initial API and implementation
 #     Kevin Cornell (Rational Software Corporation)
 # Martin Oberhuber (Wind River) - [176805] Support building with gcc and debug
+# Martin Oberhuber (Wind River) - [517013] Avoid memcpy@GLIBC_2.14 dependency
 #*******************************************************************************
 #
 # Usage: sh build.sh [<optional switches>] [clean]
@@ -84,30 +85,32 @@ case $defaultOS in
 			"x86_64")
 				defaultOSArch="x86_64"
 				defaultJava=DEFAULT_JAVA_EXEC
-				[ -d /bluebird/teamswt/swt-builddir/build/JRE/x64/jdk1.6.0_14 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/build/JRE/x64/jdk1.6.0_14"
+				[ -d /bluebird/teamswt/swt-builddir/JDKs/x86_64/jdk1.5.0 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/x86_64/jdk1.5.0"
 				OUTPUT_DIR="$EXEC_DIR/bin/$defaultWS/$defaultOS/$defaultOSArch"
 				;;
 			i?86 | "x86")
 				defaultOSArch="x86"
-				[ -d /bluebird/teamswt/swt-builddir/build/JRE/x32/jdk1.6.0_14 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/build/JRE/x32/jdk1.6.0_14"
+				[ -d /bluebird/teamswt/swt-builddir/JDKs/x86/ibm-java2-i386-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/x86/ibm-java2-i386-50"
 				OUTPUT_DIR="$EXEC_DIR/bin/$defaultWS/$defaultOS/$defaultOSArch"
 				;;
 			"ppc")
 				defaultOSArch="ppc"
 				defaultJava=DEFAULT_JAVA_EXEC
-				[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC/ibm-java2-ppc-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC/ibm-java2-ppc-50"
+				#[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC/ibm-java2-ppc-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC/ibm-java2-ppc-50"
 				OUTPUT_DIR="$EXEC_DIR/bin/$defaultWS/$defaultOS/$defaultOSArch"
 				;;
 			"ppc64")
 				defaultOSArch="ppc64"
 				defaultJava=DEFAULT_JAVA_EXEC
-				[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC64/ibm-java2-ppc64-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC64/ibm-java2-ppc64-50"
+				#[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC64/ibm-java2-ppc64-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC64/ibm-java2-ppc64-50"
+				defaultJavaHome=`readlink -f /usr/bin/java | sed "s:jre/bin/java::"`
 				OUTPUT_DIR="$EXEC_DIR/bin/$defaultWS/$defaultOS/$defaultOSArch"
 				;;
 			"ppc64le")
 				defaultOSArch="ppc64le"
 				defaultJava=DEFAULT_JAVA_EXEC
-				[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC64LE/ibm-java2-ppc64le-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC64LE/ibm-java2-ppc64le-50"
+				#[ -d /bluebird/teamswt/swt-builddir/JDKs/PPC64LE/ibm-java2-ppc64le-50 ] && defaultJavaHome="/bluebird/teamswt/swt-builddir/JDKs/PPC64LE/ibm-java2-ppc64le-50"
+				defaultJavaHome=`readlink -f /usr/bin/java | sed "s:jre/bin/java::"`
 				OUTPUT_DIR="$EXEC_DIR/bin/$defaultWS/$defaultOS/$defaultOSArch"
 				;;
 			"s390")
@@ -250,6 +253,12 @@ elif [ "$defaultOS" = "solaris" ];  then
 	if [ "$defaultOSArch" = "x86_64" -o "$defaultOSArch" = "sparcv9" ]; then
 		M_ARCH=-m64
 		export M_ARCH
+	fi
+elif [ "$defaultOS" = "linux" ]; then
+	if [ "$defaultOSArch" = "x86_64" ]; then
+		# Bug 517013: Avoid using memcpy() to remain compatible with older glibc
+		M_CFLAGS="-fno-builtin-memcpy -fno-builtin-memmove"
+		export M_CFLAGS
 	fi
 fi
 

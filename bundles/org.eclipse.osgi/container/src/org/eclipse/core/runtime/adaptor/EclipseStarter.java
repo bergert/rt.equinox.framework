@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2003, 2015 IBM Corporation and others.
+ * Copyright (c) 2003, 2016 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -137,7 +137,7 @@ public class EclipseStarter {
 
 	private static FrameworkLog log;
 	// directory of serch candidates keyed by directory abs path -> directory listing (bug 122024)
-	private static Map<String, String[]> searchCandidates = new HashMap<String, String[]>(4);
+	private static Map<String, String[]> searchCandidates = new HashMap<>(4);
 	private static EclipseAppLauncher appLauncher;
 	private static List<Runnable> shutdownHandlers;
 
@@ -184,7 +184,7 @@ public class EclipseStarter {
 
 	private synchronized static Map<String, String> getConfiguration() {
 		if (configuration == null) {
-			configuration = new HashMap<String, String>();
+			configuration = new HashMap<>();
 			// TODO hack to set these to defaults for EclipseStarter
 			// Note that this hack does not allow this property to be specified in config.ini
 			configuration.put(EquinoxConfiguration.PROP_USE_SYSTEM_PROPERTIES, System.getProperty(EquinoxConfiguration.PROP_USE_SYSTEM_PROPERTIES, "true")); //$NON-NLS-1$
@@ -476,7 +476,7 @@ public class EclipseStarter {
 			Method method = endSplashHandler.getClass().getMethod("getOutputStream", new Class[0]); //$NON-NLS-1$
 			Object outputStream = method.invoke(endSplashHandler, new Object[0]);
 			if (outputStream instanceof OutputStream) {
-				Dictionary<String, Object> osProperties = new Hashtable<String, Object>();
+				Dictionary<String, Object> osProperties = new Hashtable<>();
 				osProperties.put("name", "splashstream"); //$NON-NLS-1$//$NON-NLS-2$
 				splashStreamRegistration = context.registerService(OutputStream.class.getName(), outputStream, osProperties);
 			}
@@ -485,7 +485,7 @@ public class EclipseStarter {
 		}
 		// keep this splash handler as the default startup monitor
 		try {
-			Dictionary<String, Object> monitorProps = new Hashtable<String, Object>();
+			Dictionary<String, Object> monitorProps = new Hashtable<>();
 			monitorProps.put(Constants.SERVICE_RANKING, Integer.valueOf(Integer.MIN_VALUE));
 			defaultMonitorRegistration = context.registerService(StartupMonitor.class.getName(), new DefaultStartupMonitor(endSplashHandler, equinoxConfig), monitorProps);
 		} catch (IllegalStateException e) {
@@ -517,7 +517,7 @@ public class EclipseStarter {
 			// if it is a reference URL then strip off the reference: and set base to the file:...
 			if (url.getProtocol().equals(REFERENCE_PROTOCOL)) {
 				reference = true;
-				String baseSpec = url.getFile();
+				String baseSpec = url.getPath();
 				if (baseSpec.startsWith(FILE_SCHEME)) {
 					File child = new File(baseSpec.substring(5));
 					baseURL = child.isAbsolute() ? child.toURL() : new File(parent, child.getPath()).toURL();
@@ -525,7 +525,7 @@ public class EclipseStarter {
 					baseURL = createURL(baseSpec);
 			}
 
-			fileLocation = new File(baseURL.getFile());
+			fileLocation = new File(baseURL.getPath());
 			// if the location is relative, prefix it with the parent
 			if (!fileLocation.isAbsolute())
 				fileLocation = new File(parent, fileLocation.toString());
@@ -542,7 +542,7 @@ public class EclipseStarter {
 
 		// finally we have something worth trying	
 		try {
-			URLConnection result = url.openConnection();
+			URLConnection result = LocationHelper.getConnection(url);
 			result.connect();
 			return url;
 		} catch (IOException e) {
@@ -572,14 +572,14 @@ public class EclipseStarter {
 		Bundle[] curInitBundles = getCurrentBundles(true);
 
 		// list of bundles to be refreshed
-		List<Bundle> toRefresh = new ArrayList<Bundle>(curInitBundles.length);
+		List<Bundle> toRefresh = new ArrayList<>(curInitBundles.length);
 		// uninstall any of the currently installed bundles that do not exist in the 
 		// initial bundle list from installEntries.
 		uninstallBundles(curInitBundles, initialBundles, toRefresh);
 
 		// install the initialBundles that are not already installed.
-		List<Bundle> startBundles = new ArrayList<Bundle>(installEntries.length);
-		List<Bundle> lazyActivationBundles = new ArrayList<Bundle>(installEntries.length);
+		List<Bundle> startBundles = new ArrayList<>(installEntries.length);
+		List<Bundle> lazyActivationBundles = new ArrayList<>(installEntries.length);
 		installBundles(initialBundles, curInitBundles, startBundles, lazyActivationBundles, toRefresh);
 
 		// If we installed/uninstalled something, force a refresh of all installed/uninstalled bundles
@@ -598,7 +598,7 @@ public class EclipseStarter {
 
 	private static InitialBundle[] getInitialBundles(String[] installEntries) {
 		searchCandidates.clear();
-		List<InitialBundle> result = new ArrayList<InitialBundle>(installEntries.length);
+		List<InitialBundle> result = new ArrayList<>(installEntries.length);
 		int defaultStartLevel = Integer.parseInt(getProperty(PROP_BUNDLES_STARTLEVEL, DEFAULT_BUNDLES_STARTLEVEL));
 		String syspath = getSysPath();
 		// should canonicalize the syspath.
@@ -886,7 +886,7 @@ public class EclipseStarter {
 		URL url = LocationHelper.buildURL(urlSpec, false);
 		if (url == null)
 			return null;
-		File fwkFile = new File(url.getFile());
+		File fwkFile = LocationHelper.decodePath(new File(url.getPath()));
 		fwkFile = new File(fwkFile.getAbsolutePath());
 		fwkFile = new File(fwkFile.getParent());
 		return fwkFile.getAbsolutePath();
@@ -902,7 +902,7 @@ public class EclipseStarter {
 		URL url = cs.getLocation();
 		if (url == null)
 			return null;
-		String result = url.getFile();
+		String result = url.getPath();
 		if (File.separatorChar == '\\') {
 			// in case on windows the \ is used
 			result = result.replace('\\', '/');
@@ -922,7 +922,7 @@ public class EclipseStarter {
 
 	private static Bundle[] getCurrentBundles(boolean includeInitial) {
 		Bundle[] installed = context.getBundles();
-		List<Bundle> initial = new ArrayList<Bundle>();
+		List<Bundle> initial = new ArrayList<>();
 		for (int i = 0; i < installed.length; i++) {
 			Bundle bundle = installed[i];
 			if (bundle.getLocation().startsWith(INITIAL_LOCATION)) {
@@ -969,7 +969,7 @@ public class EclipseStarter {
 			try {
 				// don't need to install if it is already installed
 				if (osgiBundle == null) {
-					InputStream in = initialBundles[i].location.openStream();
+					InputStream in = LocationHelper.getStream(initialBundles[i].location);
 					try {
 						osgiBundle = context.installBundle(initialBundles[i].locationString, in);
 					} catch (BundleException e) {
@@ -1156,7 +1156,7 @@ public class EclipseStarter {
 	}
 
 	private static void updateSplash(Semaphore semaphore, StartupEventListener listener) throws InterruptedException {
-		ServiceTracker<StartupMonitor, StartupMonitor> monitorTracker = new ServiceTracker<StartupMonitor, StartupMonitor>(context, StartupMonitor.class.getName(), null);
+		ServiceTracker<StartupMonitor, StartupMonitor> monitorTracker = new ServiceTracker<>(context, StartupMonitor.class.getName(), null);
 		try {
 			monitorTracker.open();
 		} catch (IllegalStateException e) {
@@ -1202,14 +1202,7 @@ public class EclipseStarter {
 		String[] candidates = searchCandidates.get(start);
 		if (candidates == null) {
 			File startFile = new File(start);
-			// Pre-check if file exists, if not, and it contains escape characters,
-			// try decoding the path
-			if (!startFile.exists() && start.indexOf('%') >= 0) {
-				String decodePath = EquinoxConfiguration.decode(start);
-				File f = new File(decodePath);
-				if (f.exists())
-					startFile = f;
-			}
+			startFile = LocationHelper.decodePath(startFile);
 			candidates = startFile.list();
 			if (candidates != null)
 				searchCandidates.put(start, candidates);
@@ -1386,7 +1379,7 @@ public class EclipseStarter {
 			throw new IllegalStateException(Msg.ECLIPSE_STARTUP_ALREADY_RUNNING);
 
 		if (shutdownHandlers == null)
-			shutdownHandlers = new ArrayList<Runnable>();
+			shutdownHandlers = new ArrayList<>();
 
 		shutdownHandlers.add(handler);
 	}

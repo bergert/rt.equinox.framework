@@ -27,7 +27,7 @@ public class ContextFinder extends ClassLoader implements PrivilegedAction<List<
 
 	//This is used to detect cycle that could be caused while delegating the loading to other classloaders
 	//It keeps track on a thread basis of the set of requested classes and resources
-	private static ThreadLocal<Set<String>> cycleDetector = new ThreadLocal<Set<String>>();
+	private static ThreadLocal<Set<String>> cycleDetector = new ThreadLocal<>();
 	static ClassLoader finderClassLoader;
 	static Finder contextFinder;
 	static {
@@ -46,7 +46,7 @@ public class ContextFinder extends ClassLoader implements PrivilegedAction<List<
 
 	public ContextFinder(ClassLoader contextClassLoader) {
 		super(contextClassLoader);
-		this.parentContextClassLoader = contextClassLoader != null ? contextClassLoader : new ClassLoader(Object.class.getClassLoader()) {/*boot classloader*/};
+		this.parentContextClassLoader = contextClassLoader != null ? contextClassLoader : EquinoxContainerAdaptor.BOOT_CLASSLOADER;
 	}
 
 	// Return a list of all classloaders on the stack that are neither the 
@@ -55,7 +55,7 @@ public class ContextFinder extends ClassLoader implements PrivilegedAction<List<
 	// We assume that the bootclassloader never uses the context classloader to find classes in itself.
 	List<ClassLoader> basicFindClassLoaders() {
 		Class<?>[] stack = contextFinder.getClassContext();
-		List<ClassLoader> result = new ArrayList<ClassLoader>(1);
+		List<ClassLoader> result = new ArrayList<>(1);
 		ClassLoader previousLoader = null;
 		for (int i = 1; i < stack.length; i++) {
 			ClassLoader tmp = stack[i].getClassLoader();
@@ -104,7 +104,7 @@ public class ContextFinder extends ClassLoader implements PrivilegedAction<List<
 			return false;
 
 		if (classesAndResources == null) {
-			classesAndResources = new HashSet<String>(3);
+			classesAndResources = new HashSet<>(3);
 			cycleDetector.set(classesAndResources);
 		}
 		classesAndResources.add(name);

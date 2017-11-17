@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2013 IBM Corporation and others. All rights reserved.
+ * Copyright (c) 2006, 2016 IBM Corporation and others. All rights reserved.
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v1.0 which accompanies this distribution,
  * and is available at http://www.eclipse.org/legal/epl-v10.html
@@ -26,12 +26,12 @@ public class SignedStorageHook extends StorageHookFactory<List<SignerInfo>, List
 
 	@Override
 	public List<SignerInfo> createSaveContext() {
-		return new ArrayList<SignerInfo>();
+		return new ArrayList<>();
 	}
 
 	@Override
 	public List<SignerInfo> createLoadContext(int version) {
-		return new ArrayList<SignerInfo>();
+		return new ArrayList<>();
 	}
 
 	@Override
@@ -64,7 +64,7 @@ public class SignedStorageHook extends StorageHookFactory<List<SignerInfo>, List
 			int resultsSize = is.readInt();
 			Map<String, Object> contentMDResults = null;
 			if (resultsSize > 0) {
-				contentMDResults = new HashMap<String, Object>(resultsSize);
+				contentMDResults = new HashMap<>(resultsSize);
 				for (int i = 0; i < resultsSize; i++) {
 					String path = is.readUTF();
 					int numEntrySigners = is.readInt();
@@ -104,7 +104,7 @@ public class SignedStorageHook extends StorageHookFactory<List<SignerInfo>, List
 				try {
 					certs[i] = PKCS7Processor.certFact.generateCertificate(new ByteArrayInputStream(certBytes));
 				} catch (CertificateException e) {
-					throw (IOException) new IOException(e.getMessage()).initCause(e);
+					throw new IOException(e.getMessage(), e);
 				}
 			}
 			int anchorIdx = is.readInt();
@@ -168,7 +168,7 @@ public class SignedStorageHook extends StorageHookFactory<List<SignerInfo>, List
 					try {
 						certBytes = certs[i].getEncoded();
 					} catch (CertificateEncodingException e) {
-						throw (IOException) new IOException(e.getMessage()).initCause(e);
+						throw new IOException(e.getMessage(), e);
 					}
 					os.writeInt(certBytes.length);
 					os.write(certBytes);
