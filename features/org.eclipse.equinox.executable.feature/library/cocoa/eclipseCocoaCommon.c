@@ -210,8 +210,10 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
     // remove configuration folder
     NSError *error = nil;
-    [fileManager removeItemAtPath:configurationFolder error:&error];
-	printf("removed %s\n", [configurationFolder UTF8String]);
+    if (! [fileManager removeItemAtPath:configurationFolder error:&error]) {
+    	printf("Could not delete path %s. error", [configurationFolder UTF8String]);
+    }
+	printf("OK removed %s\n", [configurationFolder UTF8String]);
 
     // remove .metadata folder
     error = nil;
@@ -219,25 +221,8 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 	printf("removed %s\n", [metadataPath UTF8String]);
     [fileManager removeItemAtPath:metadataPath error:&error];
 
-    // if destination folder doesn't exist, create it
-    BOOL isDir = YES;
+    //finally, copy the whole configuration folder
     error = nil;
-    if (! [fileManager fileExistsAtPath:configurationFolder isDirectory:&isDir]) {
-        BOOL success = [fileManager createDirectoryAtPath:configurationFolder withIntermediateDirectories:YES attributes:nil error:&error];
-        if (!success) {
-        	printf("Error createDirectoryAtPath %s\n", [configurationFolder UTF8String]);
-        	return NO;
-        }
-        else {
-        	printf("OK: createDirectoryAtPath %s\n", [configurationFolder UTF8String]);
-        }
-    }
-    else {
-    	printf("OK: exists %s\n", [configurationFolder UTF8String]);
-    }
-
-    error = nil;
-    //finally, copy the configuration folder
     if ( !( [ fileManager copyItemAtPath:sourcePath toPath:configurationFolder error:&error ]) )  {
     	printf("Could not copy file at path %s to path %s. error",[sourcePath UTF8String], [configurationFolder UTF8String]);
     	NSLog(@"Error: %@", error);
