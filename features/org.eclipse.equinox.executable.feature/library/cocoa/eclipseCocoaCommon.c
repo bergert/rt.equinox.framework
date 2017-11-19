@@ -238,8 +238,8 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
     error = nil;
     //finally, copy the configuration folder
-    if ( !( [ fileManager copyItemAtPath:sourcePath toPath:destinationPath error:&error ]) )  {
-    	printf("Could not copy file at path %s to path %s. error",[sourcePath UTF8String], [destinationPath UTF8String]);
+    if ( !( [ fileManager copyItemAtPath:sourcePath toPath:configurationFolder error:&error ]) )  {
+    	printf("Could not copy file at path %s to path %s. error",[sourcePath UTF8String], [configurationFolder UTF8String]);
     	NSLog(@"Error: %@", error);
         [error release];
         return NO;
