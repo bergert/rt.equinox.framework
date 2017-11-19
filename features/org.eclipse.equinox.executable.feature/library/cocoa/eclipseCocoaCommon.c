@@ -9,6 +9,8 @@
  *     IBM Corporation - initial API and implementation
  *     Andrew Niefer
  *     Mikael Barbero
+ * Contributors:
+ *     Bug 494293 [Mac] fixed configuration folder; updated for 47
  *******************************************************************************/
 
 #include "eclipseCommon.h"
@@ -190,10 +192,10 @@ char * resolveSymlinks( char * path ) {
 }
 
 /*
- * copies the config file from MyApp.app/Contents/Resources/config.ini to the specified folder inside user home directory
+ * copies the config file from MyApp.app/Contents/Resources/configuraion folder to the specified folder inside user home directory
  * programdir: the path where the program runs ("MyApp.app/Contents/MacOS")
- * relpath: the relative path to the ini file ("../Resources/config.ini")
- * destpath: the destination path for the config ("~/fishstatj_workspace/configuration")
+ * relpath: the relative path to the configuraion folder ("../Resources/configuraion")
+ * destpath: the destination user-path for the configuraion ("~/fishstatj_workspace/configuration")
  */
 int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
@@ -234,24 +236,8 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
     	printf("OK: exists %s\n", [configurationFolder UTF8String]);
     }
 
-    // append the file name from sourcePath to the destination folder
-    NSString *destinationPath = [configurationFolder stringByAppendingPathComponent:[sourcePath lastPathComponent]];
-
-    /*
     error = nil;
-    //check if destinationPath exists
-    if ([ fileManager fileExistsAtPath:configurationFolder isDirectory:YES]) {
-    	printf("deleting old config.ini");
-        //removing destination, so the file may be copied
-        if (![fileManager removeItemAtPath:destinationPath error:&error])
-        {
-        	printf("Error Could not remove old file %s\n", [destinationPath UTF8String]);
-            [error release];
-            return NO;
-        }
-    } */
-    error = nil;
-    //finally, copy the config.ini file
+    //finally, copy the configuration folder
     if ( !( [ fileManager copyItemAtPath:sourcePath toPath:destinationPath error:&error ]) )  {
     	printf("Could not copy file at path %s to path %s. error",[sourcePath UTF8String], [destinationPath UTF8String]);
     	NSLog(@"Error: %@", error);

@@ -10,6 +10,8 @@
  *     Andrew Niefer
  *     Red Hat, Inc - Bug 379102 - Prevent running Eclipse as root (optionally)
  *     Rapicorp, Inc - Bug 461728 - [Mac] Allow users to specify values in eclipse.ini outside of the installation
+ * Contributors:
+ *     Bug 494293 [Mac] fixed configuration folder
  *******************************************************************************/
  
 #include "eclipseUnicode.h"
@@ -174,8 +176,10 @@ int main( int argc, _TCHAR* argv[] )
     programDir = getDirFromProgram(program);
 
 #ifdef MACOSX
-    // the config.ini is copied from MyApp.app/Contents/Eclipse folder by a project-specific post-build-script
-	if (!copyConfigFile(programDir, "../Resources/config.ini","~/fishstatj_workspace/configuration"))
+    // the configuration folder is copied 
+    // from MyApp.app/Contents/Eclipse folder
+    // to a (app-specific) user folder
+	if (!copyConfigFile(programDir, "../Resources/configuration","~/fishstatj_workspace/configuration"))
         exit( 2 );
 #endif
 
