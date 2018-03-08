@@ -179,7 +179,7 @@ int main( int argc, _TCHAR* argv[] )
     // the configuration folder is copied 
     // from MyApp.app/Contents/Eclipse folder
     // to a (app-specific) user folder
-	if (!copyConfigFile(programDir, "../Resources/configuration","~/fishstatj_workspace/configuration"))
+	if (!copyConfigFile(programDir, "../Resources/configuration","~/fishstatj_workspace"))
         exit( 2 );
 #endif
 

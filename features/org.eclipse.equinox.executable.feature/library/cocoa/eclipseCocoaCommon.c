@@ -195,39 +195,63 @@ char * resolveSymlinks( char * path ) {
  * copies the config file from MyApp.app/Contents/Resources/configuraion folder to the specified folder inside user home directory
  * programdir: the path where the program runs ("MyApp.app/Contents/MacOS")
  * relpath: the relative path to the configuraion folder ("../Resources/configuraion")
- * destpath: the destination user-path for the configuraion ("~/fishstatj_workspace/configuration")
+ * destpath: the destination user-path for the configuraion ("~/fishstatj_workspace")
  */
 int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
 	// append (programdir, relpath) and convert relpath to an absolute path (stringByStandardizingPath)
 	NSString *sourcePath        = [[[NSString stringWithUTF8String: programdir] stringByAppendingPathComponent:[NSString stringWithUTF8String: relpath]] stringByStandardizingPath];
 	// expand the tilde home directory
-	NSString *configurationFolder = [[NSString stringWithUTF8String: destpath] stringByExpandingTildeInPath];
+	NSString *workspaceFolder = [[NSString stringWithUTF8String: destpath] stringByExpandingTildeInPath];
+    NSString *configurationFolder = [workspaceFolder stringByAppendingPathComponent:@"configuration"];
 
     NSFileManager * fileManager = [ NSFileManager defaultManager];
 	printf("programdir =  %s\n", programdir);
 	printf("sourcePath =  %s\n", [sourcePath UTF8String]);
+	printf("workspaceFolder =  %s\n", [workspaceFolder UTF8String]);
+	printf("configurationFolder =  %s\n", [configurationFolder UTF8String]);
 
     // remove configuration folder
     NSError *error = nil;
     if (! [fileManager removeItemAtPath:configurationFolder error:&error]) {
-    	printf("Could not delete path %s. error", [configurationFolder UTF8String]);
+    	printf("Could not delete path %s. error\n", [configurationFolder UTF8String]);
     }
 	printf("OK removed %s\n", [configurationFolder UTF8String]);
 
     // remove .metadata folder
     error = nil;
-    NSString *metadataPath = [[configurationFolder stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".metadata"];
-	printf("removed %s\n", [metadataPath UTF8String]);
+    NSString *metadataPath = [workspaceFolder stringByAppendingPathComponent:@".metadata"];
+	printf("cleaning .metadata folder %s\n", [metadataPath UTF8String]);
     [fileManager removeItemAtPath:metadataPath error:&error];
+    
+    // create the workspace folder if it does not exist
+    BOOL isDir = YES;
+    if (! [fileManager fileExistsAtPath:workspaceFolder isDirectory:&isDir]) {
+        if (! [fileManager fileExistsAtPath:workspaceFolder isDirectory:&isDir]) {
+            BOOL success = [fileManager createDirectoryAtPath:workspaceFolder withIntermediateDirectories:YES attributes:nil error:&error];
+            if (!success) {
+                printf("Error createDirectoryAtPath %s\n", [workspaceFolder UTF8String]);
+                return NO;
+            }
+            else {
+                printf("OK: createDirectoryAtPath %s\n", [workspaceFolder UTF8String]);
+            }
+        }
+    }
+    else {
+        printf("OK: exists already %s\n", [workspaceFolder UTF8String]);
+    }
 
     //finally, copy the whole configuration folder
     error = nil;
     if ( !( [ fileManager copyItemAtPath:sourcePath toPath:configurationFolder error:&error ]) )  {
-    	printf("Could not copy file at path %s to path %s. error",[sourcePath UTF8String], [configurationFolder UTF8String]);
+    	printf("Could not copy file at path %s to path %s. error\n",[sourcePath UTF8String], [configurationFolder UTF8String]);
     	NSLog(@"Error: %@", error);
         [error release];
         return NO;
+    }
+    else {
+        printf("OK: copied %s\n", [configurationFolder UTF8String]);
     }
     return YES;
 }
