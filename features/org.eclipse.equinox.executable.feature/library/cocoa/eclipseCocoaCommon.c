@@ -220,9 +220,9 @@ int copyConfigFile(_TCHAR* programdir, _TCHAR* relpath, _TCHAR* destpath) {
 
     // remove .metadata folder
     error = nil;
-    NSString *metadataPath = [workspaceFolder stringByAppendingPathComponent:@".metadata"];
-	printf("cleaning .metadata folder %s\n", [metadataPath UTF8String]);
-    [fileManager removeItemAtPath:metadataPath error:&error];
+    //NSString *metadataPath = [workspaceFolder stringByAppendingPathComponent:@".metadata"];
+    //printf("cleaning .metadata folder %s\n", [metadataPath UTF8String]);
+    //[fileManager removeItemAtPath:metadataPath error:&error];
     
     // create the workspace folder if it does not exist
     BOOL isDir = YES;
